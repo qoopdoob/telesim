@@ -4,7 +4,9 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -57,6 +59,8 @@ const (
 	ctlABPDia    = 37
 	ctlCO2       = 38
 	ctlEtCO2     = 39
+	ctlTemp      = 48
+	ctlTempVal   = 49
 )
 
 var (
@@ -75,6 +79,7 @@ var (
 	hResp, hRR, hCardiac, hRespWave              uintptr
 	hNBPMode, hNBPInt, hNBPSys, hNBPDia, hNBPNow uintptr
 	hABP, hABPSys, hABPDia, hCO2, hEtCO2         uintptr
+	hTemp, hTempVal                              uintptr
 	uiFont                                       uintptr
 )
 
@@ -85,7 +90,7 @@ func openSetup(bed int) {
 	}
 	setupBed = bed
 	uiFont = font(S(15), false, "Segoe UI")
-	w, h := S(480), S(604)
+	w, h := S(900), S(604)
 	var mr RECT
 	call(pGetWindowRect, mainHwnd, uintptr(unsafe.Pointer(&mr)))
 	x := mr.Left + (mr.Right-mr.Left-w)/2
@@ -155,82 +160,79 @@ func openSetup(bed int) {
 	hFreq = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, cx, row(7), S(70), S(26), ctlFreq)
 	hFreqUnit = ctl("STATIC", "per minute", 0, cx+S(80), row(7)+S(3), S(190), S(22), 0)
 
-	// Measurement settings now live in the measurement setup windows; their
-	// controls are kept (hidden) so this dialog preserves those values.
-	ctlHidden = true
-	label("SpO2:", 8)
-	hSpO2 = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, cx, row(8), S(160), S(160), ctlSpO2)
-	for _, m := range SpO2ModeNames {
-		call(pSendMessageW, hSpO2, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(m))))
-	}
-	hSpO2Val = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, cx+S(170), row(8), S(55), S(26), ctlSpO2Val)
-	ctl("STATIC", "%", 0, cx+S(232), row(8)+S(3), S(30), S(22), 0)
+	hStandby = ctl("BUTTON", "Standby (monitoring paused)", WS_TABSTOP|BS_AUTOCHECKBOX, lx, row(10), S(220), S(26), ctlStandby)
+	hNote = ctl("STATIC", "", 0, lx, row(11)+S(2), S(430), S(40), 0)
 
-	label("Artifact:", 9)
-	hArt = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, cx, row(9), S(185), S(220), ctlArt)
-	for _, a := range ArtifactNames {
-		call(pSendMessageW, hArt, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(a))))
-	}
-	hArtLvl = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, cx+S(190), row(9), S(80), S(140), ctlArtLvl)
-	for _, a := range ArtLevelNames {
-		call(pSendMessageW, hArtLvl, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(a))))
-	}
-
-	label("Respiration:", 10)
-	hRR = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, cx, row(10), S(42), S(26), ctlRR)
-	ctl("STATIC", "/min (0 = apnea)", 0, cx+S(48), row(10)+S(3), S(105), S(22), 0)
-	hResp = ctl("BUTTON", "Rate", WS_TABSTOP|BS_AUTOCHECKBOX, cx+S(155), row(10), S(55), S(26), ctlResp)
-	hRespWave = ctl("BUTTON", "Wave", WS_TABSTOP|BS_AUTOCHECKBOX, cx+S(212), row(10), S(60), S(26), ctlRespWave)
-
-	hCardiac = ctl("BUTTON", "Cardiac (ECG) monitoring", WS_TABSTOP|BS_AUTOCHECKBOX, lx, row(11), S(220), S(26), ctlCardiac)
-	ctlHidden = false
-	hStandby = ctl("BUTTON", "Standby (monitoring paused)", WS_TABSTOP|BS_AUTOCHECKBOX, lx+S(230), row(11), S(220), S(26), ctlStandby)
-	hNote = ctl("STATIC", "", 0, lx, row(12)+S(2), S(430), S(40), 0)
-	ctlHidden = true
-
-	// ---- right column: blood pressure and capnography ----
-	rx, rcx := S(480), S(610)
+	// ---- right column: what is monitored (also reachable from the
+	// measurement Setup windows, but a measurement that is off has no wave or
+	// numeric to click) ----
+	rx, rcx := S(480), S(600)
 	rlabel := func(s string, i int) uintptr {
 		return ctl("STATIC", s, 0, rx, row(i)+S(3), rcx-rx-S(6), S(22), 0)
 	}
-	ctl("STATIC", "Blood pressure and CO\u2082", 0, rx, row(0)+S(3), S(340), S(22), 0)
-	rlabel("NBP (cuff):", 1)
-	hNBPMode = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx, row(1), S(100), S(140), ctlNBPMode)
+	ctl("STATIC", "Monitoring", 0, rx, row(0)+S(3), S(340), S(22), 0)
+	hCardiac = ctl("BUTTON", "Cardiac (ECG) monitoring", WS_TABSTOP|BS_AUTOCHECKBOX, rx, row(1), S(260), S(26), ctlCardiac)
+
+	rlabel("SpO\u2082:", 2)
+	hSpO2 = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx, row(2), S(160), S(160), ctlSpO2)
+	for _, m := range SpO2ModeNames {
+		call(pSendMessageW, hSpO2, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(m))))
+	}
+	hSpO2Val = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx+S(170), row(2), S(48), S(26), ctlSpO2Val)
+	ctl("STATIC", "%", 0, rcx+S(224), row(2)+S(3), S(30), S(22), 0)
+
+	rlabel("Respiration:", 3)
+	hRR = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx, row(3), S(42), S(26), ctlRR)
+	ctl("STATIC", "/min (0 = apnea)", 0, rcx+S(48), row(3)+S(3), S(105), S(22), 0)
+	hResp = ctl("BUTTON", "Rate", WS_TABSTOP|BS_AUTOCHECKBOX, rcx+S(155), row(3), S(55), S(26), ctlResp)
+	hRespWave = ctl("BUTTON", "Wave", WS_TABSTOP|BS_AUTOCHECKBOX, rcx+S(212), row(3), S(60), S(26), ctlRespWave)
+
+	rlabel("NBP (cuff):", 4)
+	hNBPMode = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx, row(4), S(100), S(140), ctlNBPMode)
 	for _, m := range NBPModeNames {
 		call(pSendMessageW, hNBPMode, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(m))))
 	}
-	hNBPInt = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx+S(106), row(1), S(110), S(180), ctlNBPInt)
+	hNBPInt = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx+S(106), row(4), S(120), S(180), ctlNBPInt)
 	for _, m := range NBPIntervals {
 		call(pSendMessageW, hNBPInt, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr("Auto "+NBPIntervalLabel(m)))))
 	}
-	rlabel("Patient's BP:", 2)
-	hNBPSys = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx, row(2), S(48), S(26), ctlNBPSys)
-	ctl("STATIC", "/", 0, rcx+S(52), row(2)+S(3), S(10), S(22), 0)
-	hNBPDia = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx+S(64), row(2), S(48), S(26), ctlNBPDia)
-	ctl("STATIC", "mmHg", 0, rcx+S(118), row(2)+S(3), S(50), S(22), 0)
-	hNBPNow = ctl("BUTTON", "Measure NBP now", WS_TABSTOP, rcx, row(3), S(150), S(28), ctlNBPNow)
+	rlabel("Patient's BP:", 5)
+	hNBPSys = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx, row(5), S(48), S(26), ctlNBPSys)
+	ctl("STATIC", "/", 0, rcx+S(52), row(5)+S(3), S(10), S(22), 0)
+	hNBPDia = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx+S(64), row(5), S(48), S(26), ctlNBPDia)
+	ctl("STATIC", "mmHg", 0, rcx+S(118), row(5)+S(3), S(45), S(22), 0)
+	hNBPNow = ctl("BUTTON", "Measure now", WS_TABSTOP, rcx+S(166), row(5), S(110), S(28), ctlNBPNow)
 
-	hABP = ctl("BUTTON", "ABP (arterial line)", WS_TABSTOP|BS_AUTOCHECKBOX, rx, row(5), S(250), S(26), ctlABP)
-	rlabel("Arterial sys/dia:", 6)
+	hABP = ctl("BUTTON", "ABP (art. line)", WS_TABSTOP|BS_AUTOCHECKBOX, rx, row(6), rcx-rx-S(4), S(26), ctlABP)
 	hABPSys = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx, row(6), S(48), S(26), ctlABPSys)
 	ctl("STATIC", "/", 0, rcx+S(52), row(6)+S(3), S(10), S(22), 0)
 	hABPDia = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx+S(64), row(6), S(48), S(26), ctlABPDia)
 	ctl("STATIC", "mmHg", 0, rcx+S(118), row(6)+S(3), S(50), S(22), 0)
 
-	hCO2 = ctl("BUTTON", "EtCO\u2082 (capnography)", WS_TABSTOP|BS_AUTOCHECKBOX, rx, row(8), S(250), S(26), ctlCO2)
-	rlabel("End-tidal CO\u2082:", 9)
-	hEtCO2 = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx, row(9), S(48), S(26), ctlEtCO2)
-	ctl("STATIC", "mmHg  (breaths follow the resp rate)", 0, rcx+S(54), row(9)+S(3), S(190), S(22), 0)
+	hCO2 = ctl("BUTTON", "EtCO\u2082", WS_TABSTOP|BS_AUTOCHECKBOX, rx, row(7), rcx-rx-S(4), S(26), ctlCO2)
+	hEtCO2 = ctl("EDIT", "", WS_TABSTOP|ES_NUMBER, rcx, row(7), S(48), S(26), ctlEtCO2)
+	ctl("STATIC", "mmHg", 0, rcx+S(54), row(7)+S(3), S(60), S(22), 0)
 
-	ctlHidden = false
+	hTemp = ctl("BUTTON", "Temp", WS_TABSTOP|BS_AUTOCHECKBOX, rx, row(9), rcx-rx-S(4), S(26), ctlTemp)
+	hTempVal = ctl("EDIT", "", WS_TABSTOP|ES_AUTOHSCROLL, rcx, row(9), S(56), S(26), ctlTempVal)
+	ctl("STATIC", TempUnit()+"  (probe)", 0, rcx+S(62), row(9)+S(3), S(100), S(22), 0)
+
+	rlabel("Artifact:", 8)
+	hArt = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx, row(8), S(185), S(220), ctlArt)
+	for _, a := range ArtifactNames {
+		call(pSendMessageW, hArt, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(a))))
+	}
+	hArtLvl = ctl("COMBOBOX", "", WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL, rcx+S(190), row(8), S(80), S(140), ctlArtLvl)
+	for _, a := range ArtLevelNames {
+		call(pSendMessageW, hArtLvl, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(wstr(a))))
+	}
+
 	hLeadsEp = ctl("BUTTON", "Electrodes come off now and then (Leads Off ~10 s - 4 min)", WS_TABSTOP|BS_AUTOCHECKBOX, lx, row(8), S(440), S(26), ctlLeadsEp)
 	hAlarmsOffBox = ctl("BUTTON", "Alarms Off (all alarms for this patient)", WS_TABSTOP|BS_AUTOCHECKBOX, lx, row(9), S(300), S(26), ctlAlarmsOff)
 	if patients[bed].AlarmsOff {
 		call(pSendMessageW, hAlarmsOffBox, BM_SETCHECK, 1, 0)
 	}
-	call(pSetWindowPos, hStandby, 0, uintptr(lx), uintptr(row(10)), 0, 0, 0x0001|0x0004) // SWP_NOSIZE|SWP_NOZORDER
-	call(pSetWindowPos, hNote, 0, uintptr(lx), uintptr(row(11)+S(2)), 0, 0, 0x0001|0x0004)
-	ctl("STATIC", "ECG lead, artifact, SpO\u2082, Resp, NBP, ABP, CO\u2082 and alarm limits: click the wave or numeric, or use Measurements.",
+	ctl("STATIC", "ECG lead, alarm limits and other measurement settings: click the wave or numeric, or use Measurements.",
 		0, lx, row(12)+S(4), S(440), S(40), 0)
 	by := row(13) + S(14)
 	okText := "OK"
@@ -297,6 +299,14 @@ func openSetup(bed int) {
 		call(pSendMessageW, hCO2, BM_SETCHECK, 1, 0)
 	}
 	setNum(hEtCO2, c.EtCO2, 38)
+	if c.TempOn {
+		call(pSendMessageW, hTemp, BM_SETCHECK, 1, 0)
+	}
+	tc := c.Temp
+	if tc == 0 {
+		tc = 37
+	}
+	call(pSetWindowTextW, hTempVal, uintptr(unsafe.Pointer(wstr(TempStr(tc)))))
 	ir := c.IntrRate
 	if ir == 0 {
 		ir = 55
@@ -386,6 +396,7 @@ func refreshSetup() {
 	enable(hABPSys, abpOn)
 	enable(hABPDia, abpOn)
 	enable(hEtCO2, call(pSendMessageW, hCO2, BM_GETCHECK, 0, 0) == 1)
+	enable(hTempVal, call(pSendMessageW, hTemp, BM_GETCHECK, 0, 0) == 1)
 	enable(hLeadsEp, r != RLeadsOff && cardiacOn)
 	paced := IsPaced(r)
 	show := func(h uintptr, on bool) {
@@ -579,6 +590,8 @@ func applySetup() {
 		CO2On:       call(pSendMessageW, hCO2, BM_GETCHECK, 0, 0) == 1,
 		EtCO2:       et,
 		SpO2:        spo2,
+		TempOn:      call(pSendMessageW, hTemp, BM_GETCHECK, 0, 0) == 1,
+		Temp:        readTemp(hTempVal, patients[setupBed].Cfg.Temp),
 	}
 	if !info.Ectopy {
 		cfg.Ectopy = EctNone
@@ -635,7 +648,7 @@ func setupProc(hwnd, msg, wp, lp uintptr) uintptr {
 				call(pSetWindowTextW, hRate, uintptr(unsafe.Pointer(wstr(strconv.Itoa(def)))))
 				refreshSetup()
 			}
-		case ctlResp, ctlRespWave, ctlCardiac, ctlABP, ctlCO2, ctlPulseless:
+		case ctlResp, ctlRespWave, ctlCardiac, ctlABP, ctlCO2, ctlTemp, ctlPulseless:
 			refreshSetup()
 		case ctlNBPMode, ctlNBPInt:
 			if code == CBN_SELCHANGE {
@@ -655,4 +668,18 @@ func setupProc(hwnd, msg, wp, lp uintptr) uintptr {
 		return 0
 	}
 	return call(pDefWindowProcW, hwnd, msg, wp, lp)
+}
+
+// readTemp reads a temperature typed in the display unit (°C kept), or
+// returns def if it is not a sensible body temperature.
+func readTemp(h uintptr, def float64) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(strings.ReplaceAll(getText(h), ",", ".")), 64)
+	if err != nil {
+		return def
+	}
+	c := TempIn(math.Round(v*10) / 10)
+	if c < 25 || c > 45 {
+		return def
+	}
+	return c
 }

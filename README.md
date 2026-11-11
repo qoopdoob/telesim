@@ -39,7 +39,7 @@ You control every patient's rhythm, rate, ectopy, conduction, vital signs and al
    - fill the whole board at once from the **Patients** menu (for example *Simulate typical ER telemetry board*), or
    - hover over a single bed, press **Activate Bed** and choose a rhythm.
 
-The default board shows 12 patients in 3 columns.
+The default board shows 12 patients in 2 columns.
 
 **A two-minute tour:**
 
@@ -55,7 +55,7 @@ The default board shows 12 patients in 3 columns.
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | Station name, *Silence All* button (while anything is sounding), sound on/off, sweep speed, optional frame rate, date and time |
+| **Top bar** | Station name, *Silence All* button (while anything is sounding), **Sound** on/off button (amber while the sound is off), **sweep speed** button, optional frame rate, date and time |
 | **Patient sectors** | Bed label, patient name (or *Not Admitted*), alarm message box, waveforms on the left, numerics on the right |
 | **Expanded view** | One patient docked full-width along the bottom of the board, with every wave and measurement |
 | **Bottom bar** | Reminder of the mouse controls |
@@ -65,21 +65,26 @@ The default board shows 12 patients in 3 columns.
 - **ECG** (green), with:
   - a clickable lead label;
   - a 1 mV calibration bar;
-  - the monitor's **rhythm status** and **ectopic status** messages (for example *Sinus Tachy*, *Vent Bigeminy*, *Irregular HR*, *Pair PVCs*), worked out from the monitor's own beat classification;
+  - the monitor's **rhythm status** and **ectopic status** messages (for example *Sinus Tach*, *SV Rhythm*, *SV Tachy*, *Paced Rhythm*, *Vent Bigeminy*, *Irregular HR*, *Pair PVCs*), worked out from the monitor's own beat classification;
   - a white pacer spike for each pace pulse.
 - **ABP** (red, optional), with 0 and 150 mmHg scale lines.
 - **Pleth** (cyan), from the pulse oximeter.
 - **CO₂** (yellow, optional) capnogram.
 - **Resp** (purple, optional) impedance respiration wave.
-- **Numerics**: label, alarm limits and value for HR, ABP, NBP, RR, SpO₂, Pulse and etCO₂.
+- **Numerics**: label, alarm limits and value, top to bottom: HR, SpO₂, Pulse, RR, etCO₂, Temp, then the blood pressures (ABP, NBP) at the bottom.
   - With more than three numerics they form two columns.
-  - The first column lines each number up with its own waveform (HR beside the ECG, SpO₂ beside the Pleth).
-  - The second column holds the rest (RR above NBP, Pulse, and so on).
+  - The first column lines each number up with its own waveform (HR beside the ECG, SpO₂ beside the Pleth; the ABP wave is the lowest wave, so its number is at the bottom).
+  - The second column holds the rest (Pulse, RR, Temp, and NBP at the bottom).
 - **Background**: a sector turns **blue** while it has a new, unacknowledged red or yellow alarm. Technical alarms (INOPs) do not change the background.
 
 ### Sweep speed
 
-Waves move at real physical speeds on your screen: ECG, Pleth and ABP at **25 mm/s**, Resp and CO₂ at **6.25 mm/s**. The speed is calibrated from the monitor size Windows reports. Wider sectors therefore show more seconds of signal, as on a real station. The **View** menu also offers 12.5 and 50 mm/s.
+Waves move at real physical speeds on your screen: ECG, Pleth and ABP at **25 mm/s**, Resp and CO₂ at **6.25 mm/s**. The speed is calibrated from the monitor size Windows reports. Wider sectors therefore show more seconds of signal, as on a real station. The two speeds are set separately, as on the monitor, from the **speed button** in the top bar (it shows e.g. "25 / 6.25 mm/s") or *View → Sweep speed*:
+
+- **ECG / Pleth / ABP:** 6.25, 12.5, 25 (standard) or 50 mm/s;
+- **Resp / CO₂:** 3.125, 6.25 (standard), 12.5 or 25 mm/s.
+
+A sector shows at most about a minute of signal, so at the slowest speeds a very wide view is compressed to fit.
 
 ---
 
@@ -122,6 +127,17 @@ The buttons are laid out as at the Information Center:
 - **Electrodes come off now and then**: intermittent Leads Off episodes.
 - **Alarms Off**: switches off all alarms for this patient.
 - **Standby.**
+- **Monitoring** (right-hand column): what is monitored and the patient's own values:
+  - Cardiac (ECG) monitoring;
+  - SpO₂ (monitored / sensor off / off) and the true SpO₂;
+  - respiration rate (0 = apnea), with RR numeric and Resp wave on/off;
+  - NBP mode and interval, the patient's blood pressure, and *Measure now*;
+  - ABP (arterial line) and its pressures;
+  - EtCO₂ (capnography) and its value;
+  - Temp (temperature probe) and the patient's temperature, in the display unit;
+  - artifact type and level.
+
+  Use these to switch on a measurement that is off, since a measurement that is off has no wave or numeric to click.
 
 *Apply* changes the patient live; *OK* applies and closes the window.
 
@@ -145,11 +161,12 @@ Rows marked **(sim)** set the simulated patient's own value, such as the true Sp
 |---|---|
 | **Setup ECG** | ECG on/off, primary lead, Alarms on/off, HR high/low, ∆ExtrTachy and ∆ExtrBrady (resulting extreme limits shown), ST high/low, QTc high, artifact type and level (sim), *Fine Tune Waveform…*, *Setup Arrhythmia…* |
 | **Setup Arrhythmia** | V-Tach HR and run, vent rhythm run, SVT HR and run, PVCs/min, asystole and pause thresholds, AFib/IHR end delay, *All Yellow Off / On*, and each switchable arrhythmia alarm |
-| **Setup SpO₂** | SpO₂ on / sensor off / off, patient SpO₂ (sim), high, low and desat limits, Alarms on/off |
+| **Setup SpO₂** | SpO₂ on / sensor off / off, patient SpO₂ (sim), pleth damping (sim; probe site), high, low and desat limits, Alarms on/off |
 | **Setup Resp** | RR numeric and Resp wave on/off, patient resp rate (sim; 0 = apnea), high/low limits, apnea time, Alarms on/off |
 | **Setup NBP** | Mode, repeat time, *Start NBP*, patient systolic and diastolic (sim), NBPs high/low, Alarms on/off |
 | **Setup ABP** | ABP on/off, patient systolic and diastolic (sim), ABPs high/low and extreme high/low, Alarms on/off |
 | **Setup CO₂** | CO₂ on/off, patient etCO₂ (sim), etCO₂ high/low, Alarms on/off |
+| **Setup Temp** | Temp on/off, patient temperature (sim), Temp high/low, unit (°F / °C), Alarms on/off |
 
 When a measurement's alarms are off, its numeric shows a red ✕. Switching off ECG alarms also raises the INOP *ECG/Arrh AlarmsOff*. When all of a patient's alarms are off, an ✕ appears beside the bed label together with *Alarms Off*.
 
@@ -159,7 +176,8 @@ Open it from *Setup ECG → Fine Tune Waveform…* to adjust the patient's own w
 
 - **PR, QRS and QT intervals** (0 = automatic);
 - **P, QRS and T amplitudes** (a negative T amplitude inverts the T wave);
-- **ST segment** in mm (+ for elevation, − for depression).
+- **ST segment** in mm (+ for elevation, − for depression);
+- **Pleth damping** in % (0 = a finger probe; about 50 = an ear clip; about 70 = a nose sensor). A damped probe site gives a smaller, rounder pulse with a slower upstroke and no dicrotic notch. The SpO₂ and pulse readings are unaffected.
 
 *Reset* returns to a standard waveform; *Cancel* undoes anything applied.
 
@@ -255,8 +273,13 @@ Each question offers four answers: the correct one, two similar rhythms and one 
 - **Non-perfusing rhythms** (asystole, VF, torsades, pulseless VT):
   - the Pleth goes flat;
   - the arterial pressure runs off to about 17/15 (16) mmHg within about 15 seconds;
-  - NBP measurements fail and EtCO₂ falls.
-- **Return of a perfusing rhythm:** pressures recover over 20–30 seconds, and an NBP taken during recovery reads low.
+  - NBP measurements fail and EtCO₂ falls;
+  - breathing continues for 8–15 seconds, then gives way to **agonal gasps**: quick, deep and irregular, one every 7–14 seconds. The RR falls to about 5/min and each gasp makes only a small CO₂ blip;
+  - after 30–90 seconds of gasping the patient stops breathing, and *** Apnea alarms.
+- **Return of a perfusing rhythm:**
+  - pressures recover over 20–30 seconds, and an NBP taken during recovery reads low;
+  - spontaneous breathing resumes 5–12 seconds after the pulse returns.
+  - The apnea timer is not reset by a rhythm change, so *** Apnea stays until the patient actually breathes.
 - **Leads Off:** SpO₂ and EtCO₂ keep working. The heart keeps beating underneath, so the pulse oximeter becomes the heart-rate alarm source.
 - **Natural variation:**
   - Patients generated by the unit presets get their own ECG "fingerprint": intervals, amplitudes and ST position, occasionally a bundle branch block, long QT, T inversion or ST change. They also get beat-to-beat variability.
@@ -273,17 +296,32 @@ Each question offers four answers: the correct one, two similar rhythms and one 
 | **ST / QT** | ST-*lead* (mm), and QTc/QT in the expanded view | ** ST-*lead* High / Low, ** QTc High (after 5 minutes) |
 | **SpO₂ / Pulse** | Saturation and pulse rate from the pleth | ** SpO₂ High / Low (10 s delay), *** Desat (20 s delay), SpO₂ No Pulse, SpO₂ Sensor Off. With no usable ECG: ** Pulse High / Low, *** Brady / Tachy (Pulse) |
 | **RR** | Impedance respiration rate, with optional wave | ** RR High / Low, *** Apnea, Resp Leads Off |
-| **NBP** | `sys/dia (mean)` on one line, with time and mode (e.g. *NBP 17:32 Auto 15 min*); live cuff pressure during a ~25 s measurement | ** NBPs High / Low, NBP Measure Failed |
-| **ABP** | Arterial waveform with dicrotic notch; `sys/dia (mean)` measured from the wave, also when non-pulsatile | *** ABPs High / Low (extreme limits), ** ABPs High / Low, *** ABP Disconnect |
+| **NBP** | `sys/dia (mean)` on one line, with time and mode (e.g. *NBP 17:32 Auto 15 min*); live cuff pressure during a ~25 s measurement | ** NBPs High / Low, ** NBPd High / Low (diastolic), NBP Measure Failed |
+| **ABP** | Arterial waveform with dicrotic notch; `sys/dia (mean)` measured from the wave, also when non-pulsatile | *** ABPs High / Low (extreme limits), ** ABPs High / Low, ** ABPd High / Low (diastolic), *** ABP Disconnect |
 | **etCO₂ / awRR** | Capnogram, end-tidal CO₂ and airway respiratory rate | ** etCO₂ High / Low, ** awRR High / Low, *** Apnea, CO₂ Alarm Suppress |
+| **Temp** (optional probe) | Temperature in °F or °C (*View* menu). It follows a change in the patient's temperature over about a minute, with a small natural drift | ** Temp High / Low (5 s delay) |
 
-NBP auto intervals: 1, 3, 5, 10, 15 and 30 min; 1, 4 and 8 hr.
+NBP auto intervals: 1, 3, 5, 10, 15 and 30 min; 1, 2, 4 and 8 hr.
 
 ---
 
 ## 8. Alarms
 
-Alarm texts, priorities, latching and detection criteria follow the Philips IntelliVue **MX100/X3** *Instructions for Use* ("Alarms"; "Patient Alarms and INOPs"; "ECG, Arrhythmia, ST and QT Monitoring"), using the adult factory defaults.
+Alarm texts, priorities, latching and detection criteria follow the Philips IntelliVue **MX100/X3** *Instructions for Use* ("Alarms"; "Patient Alarms and INOPs"; "ECG, Arrhythmia, ST and QT Monitoring"), using the adult factory defaults for the red limits and arrhythmia settings.
+
+**Default limits** (as configured on the unit's monitors):
+
+| | Low | High |
+|---|---|---|
+| HR and Pulse | 50 bpm | 120 bpm |
+| Extreme Brady / Tachy (red) | 40 bpm | 140 bpm (∆ExtrBrady / ∆ExtrTachy 20) |
+| SpO₂ | 95 % (Desat, red: 90 %) | 100 % |
+| RR | 8 rpm (Apnea: 20 s) | 30 rpm |
+| NBP and ABP systolic | 90 mmHg | 180 mmHg |
+| NBP and ABP diastolic | 40 mmHg | 100 mmHg |
+| ABP systolic extreme (red) | 70 mmHg | 200 mmHg |
+| etCO₂ | 35 mmHg | 45 mmHg |
+| Temp | 36.0 °C (96.8 °F) | 38.0 °C (100.4 °F) |
 
 ### Display and sound
 
@@ -293,7 +331,7 @@ Alarm texts, priorities, latching and detection criteria follow the Philips Inte
   - one-star yellow arrhythmia alarms `*`;
   - technical alarms (INOPs): cyan, with no stars (for example *ECG Leads Off*).
 - **Alarm text** (*Alarms → Alarm text: Enhanced*):
-  - **Enhanced** shows the worst value measured during the alarm and the limit: `*** Desat 78 < 80`, `*** xBrady 35<40`, `*** Brady/P 35<40`, `*** Apnea 0:25`, `** SpO₂ 88<90`.
+  - **Enhanced** shows the worst value measured during the alarm and the limit: `*** Desat 86 < 90`, `*** xBrady 35<40`, `*** Brady/P 35<40`, `*** Apnea 0:25`, `** SpO₂ 93<95`.
   - **Standard** shows the plain name: `*** Desat`, `*** Extreme Brady`, `** SpO₂ Low`.
   - When several alarms share the top priority, the message alternates every 2 seconds.
 - **Sound:** the station plays the tone of the highest-priority alarm sounding anywhere on the board. The tones were synthesized to match recordings of a real central station:
@@ -306,7 +344,8 @@ Alarm texts, priorities, latching and detection criteria follow the Philips Inte
 
 - **Acknowledge** with a double-click on the patient, or with *Silence All*.
   - A latched alarm whose condition has ended clears at once.
-  - Otherwise the sector returns to black and the message is **frozen** with a ✓ until the condition has been clear for 5 seconds.
+  - Otherwise the sector returns to black and the message is **frozen** with a ✓ until that alarm's condition has been clear for 5 seconds. Every alarm present at that moment is acknowledged.
+  - When the frozen alarm ends, the banner clears, even if the patient has other alarms. If the next alarm was also present when you acknowledged, it is shown with a ✓ and stays silent. If it arrived later, it alarms normally.
   - A **higher-priority** alarm (for example yellow escalating to red) alarms anew.
 - **Latching** (*Alarms → Alarm latching*) offers the six combinations the monitor allows: visual Red&Yellow / Red Only / Off, combined with audible Red&Yellow / Red Only / Off. The default is Red Only / Red Only.
 
@@ -376,7 +415,7 @@ Every beat is labelled **N** (supraventricular), **S** (premature supraventricul
   - ** QTc High when the limit has been exceeded for more than 5 minutes.
 - **ABP:**
   - *** ABPs High / Low beyond the extreme limits (200 / 70);
-  - ** ABPs High / Low beyond the normal limits;
+  - ** ABPs High / Low beyond the normal limits, then ** ABPd High / Low for the diastolic (NBP likewise: ** NBPs, then ** NBPd);
   - *** ABP Disconnect when the trace is non-pulsatile with a mean below 10 mmHg.
 - **CO₂** alarms are suppressed (*CO₂ Alarm Suppress*) until the first breath is detected.
 - *NBP Measure Failed* stays visible until the next measurement starts.
@@ -390,7 +429,7 @@ Every beat is labelled **N** (supraventricular), **S** (premature supraventricul
 - **Per patient:** a patient's *Setup* windows, or *Measurements → Alarm limits table*.
 - **What can be set:**
   - **ECG and arrhythmia:** HR low/high, ∆ExtrBrady and ∆ExtrTachy, V-Tach HR and run, vent rhythm run, SVT HR and run, PVCs/min, asystole and pause thresholds, AFib/IHR end delay, ST high/low, QTc.
-  - **Other measurements:** SpO₂ high/low and desat, RR and apnea time, NBPs, ABPs and ABPs extreme, etCO₂.
+  - **Other measurements:** SpO₂ high/low and desat, RR and apnea time, NBPs and NBPd, ABPs, ABPd and ABPs extreme, etCO₂, Temp.
 
 ---
 
@@ -401,13 +440,13 @@ The **Patients** menu fills the whole board:
 | Preset | Character |
 |---|---|
 | **Randomize** | Any rhythm, including lethal ones |
-| **Typical ER telemetry board** | Mostly sinus rhythms and AF, some paced and block rhythms; auto NBP on most patients; capnography rare |
+| **Typical ER telemetry board** | Mostly sinus rhythms and AF, some paced and block rhythms; SpO₂ and auto NBP on most patients (every patient has a pulse oximeter, unplugged (*SpO₂ Sensor Off*) on those not being monitored, and a cuff; those not on an auto cycle are in Manual mode with a blank reading until measured), with varied probe sites (mostly fingers; some cold fingers, ear clips and nose sensors, giving damped pleths); capnography rare |
 | **Med-surg telemetry floor** | Older, stable patients: more rate-controlled AF, pacemakers and sinus brady. Unstable rhythms are rare. No SpO₂ or NBP on the monitor; more motion artifact |
-| **Step-down unit** | Sicker: more sinus tach, AF with RVR, flutter, SVT and blocks; SpO₂ and NBP on most (mostly hourly); a few arterial lines |
-| **ICU** | The sickest mix: SpO₂ on nearly everyone, many arterial lines and capnography |
+| **Step-down unit** | Sicker: more sinus tach, AF with RVR, flutter, SVT and blocks; SpO₂ on nearly everyone (the rest have the sensor unplugged), auto NBP on most (mostly hourly; everyone else has a cuff in Manual mode); a few arterial lines |
+| **ICU** | The sickest mix: SpO₂ on nearly everyone, many arterial lines and capnography, temperature probes on about 40% |
 
 - **No lethal rhythms in the unit presets.** None of them include lethal rhythms; add those yourself for drills.
-- **Scenario odds…** sets, per unit, the percentage of patients with SpO₂, auto NBP, an arterial line, capnography, artifact, and electrodes that come off now and then.
+- **Scenario odds…** sets, per unit, the percentage of patients with SpO₂, auto NBP, an arterial line, capnography, artifact, electrodes that come off now and then, and a temperature probe. Patients given a temperature probe are mostly afebrile; about 1 in 5 has a fever. A patient generated with both an arterial line and capnography is 40 percentage points more likely to have one (e.g. 41% instead of 1% in the ED). In the ED, temperature probes are as uncommon as arterial lines (about 1%).
 - **Leads off in every preset.** Every preset, and *Randomize*, includes a few patients whose leads are off and a few whose **electrodes come off now and then**:
   - about three times an hour, the ECG and impedance resp show *ECG Leads Off*;
   - most episodes last 10–50 seconds (patient moving, loose electrode); some last 1–4 minutes (off to the bathroom);
@@ -421,7 +460,7 @@ The **Patients** menu fills the whole board:
 |---|---|
 | **File** | Exit |
 | **Patients** | Set up any bed, Activate all beds, Put all beds in Standby, Randomize, the unit presets, Scenario odds, Reset all beds to Leads Off |
-| **View** | Number of sectors (4–16), columns (Auto, 1–4), sweep speed, rhythm labels, frame rate, alarm messages on/off |
+| **View** | Number of sectors (4–16), columns (Auto, 1–4), sweep speed (ECG and resp separately), temperature in °F / °C, rhythm labels, frame rate, alarm messages on/off |
 | **Alarms** | Silence all, alarm and arrhythmia limits, alarm text (Enhanced / Standard), alarm latching, HR High/Low as standard yellow, sound on/off, volume |
 | **Events** | Event Log |
 | **Quiz** | Rhythm Quiz (10 strips) |
@@ -498,7 +537,8 @@ On Linux or macOS, `go run .` does not open the GUI. It runs a preview tool that
 | `rsrc_windows_amd64.syso` | The icon compiled as a Windows resource; `go build` links it into the .exe automatically |
 | `tools/` | `mkicon.py` (draws the icon), `app.rc` (resource script), `smiley.png` and `tracesmiley.py` (the smiley drawing and its tracer) |
 | `preview_other.go` | Non-Windows preview renderer |
-| `rate_test.go`, `soak_test.go` | Tests |
+| `ack.go` | Acknowledged alarms at the station (which banner is frozen, and when it clears) |
+| `rate_test.go`, `soak_test.go`, `arrest_resp_test.go`, `temp_test.go`, `ack_test.go`, `status_test.go` | Tests |
 | `LICENSE` | The GNU General Public License, version 3 |
 
 The engine files (`ecg.go`, `arrhythmia.go`, `vitals.go`, `scenarios.go`, `quiz.go`, `alarmsynth.go`) are platform-independent. Everything with the `_windows.go` suffix is the Win32 front end.
@@ -510,6 +550,7 @@ go test ./...
 ```
 
 - `rate_test.go` steps every rhythm through its full rate range and checks that the simulated rate matches the setting.
+- `arrest_resp_test.go` checks that breathing stops after agonal gasps in asystole, VF and pulseless VT, and resumes after a pulse returns.
 - `soak_test.go` runs dozens of patients across all rhythms and presets for 25 simulated minutes, reconfiguring them as it goes. It checks for unbounded memory growth and invalid samples.
 
 ---

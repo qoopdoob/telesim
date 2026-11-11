@@ -60,7 +60,7 @@ func drawExpanded(dc uintptr, bed int, rc RECT, t float64) {
 	spo2On := p.Cfg.SpO2On != SpO2Off
 	respOn := !p.Cfg.RespRateOff // in the expanded view the resp wave is always shown when resp is monitored
 
-	// ---- measurements: up to three columns (ECG / pressures / gas & SpO2) ----
+	// ---- measurements: up to three columns (ECG / SpO2 & gas / pressures last) ----
 	var colA, colB, colC []int
 	if ecgOn {
 		colA = []int{kHR, kPVCnum, kST, kQT}
@@ -80,8 +80,11 @@ func drawExpanded(dc uintptr, bed int, rc RECT, t float64) {
 	if p.Cfg.CO2On {
 		colC = append(colC, kCO2, kAwRR)
 	}
+	if p.Cfg.TempOn {
+		colC = append(colC, kTemp)
+	}
 	var cols [][]int
-	for _, c := range [][]int{colA, colB, colC} {
+	for _, c := range [][]int{colA, colC, colB} {
 		if len(c) > 0 {
 			cols = append(cols, c)
 		}
@@ -102,9 +105,6 @@ func drawExpanded(dc uintptr, bed int, rc RECT, t float64) {
 			ws = append(ws, wv{kHR, l, 1})
 		}
 	}
-	if p.Cfg.ABPOn {
-		ws = append(ws, wv{kABP, "", 1})
-	}
 	if spo2On {
 		ws = append(ws, wv{kSpO2, "", 0.8})
 	}
@@ -113,6 +113,9 @@ func drawExpanded(dc uintptr, bed int, rc RECT, t float64) {
 	}
 	if respOn {
 		ws = append(ws, wv{kRR, "", 0.8})
+	}
+	if p.Cfg.ABPOn {
+		ws = append(ws, wv{kABP, "", 1})
 	}
 	tot := 0.0
 	for _, x := range ws {
@@ -165,7 +168,7 @@ func drawExpanded(dc uintptr, bed int, rc RECT, t float64) {
 			text(dc, "CO\u2082", r.Left+S(4), r.Top+S(1), r.Left+S(80), r.Top+S(18), cYellow, lf, DT_SINGLELINE)
 			drawCO2(dc, p, r, tr)
 		case kRR:
-			text(dc, "Resp", r.Left+S(4), r.Top+S(1), r.Left+S(80), r.Top+S(18), cPurple, lf, DT_SINGLELINE)
+			text(dc, "Resp", r.Left+S(4), r.Top+S(1), r.Left+S(80), r.Top+S(18), cResp, lf, DT_SINGLELINE)
 			drawResp(dc, p, tr)
 		}
 	}

@@ -23,8 +23,8 @@ var (
 	cWhite    = rgb(240, 240, 240)
 	cGrey     = rgb(140, 140, 140)
 	cCyan     = rgb(0, 230, 255)
-	cPurple   = rgb(205, 125, 255)
-	cAlarmBg  = rgb(30, 34, 132) // sector background for a new (unacknowledged) alarm
+	cResp     = rgb(205, 125, 255) // respiration (Resp wave and RR): purple
+	cAlarmBg  = rgb(30, 34, 132)   // sector background for a new (unacknowledged) alarm
 	cSepLine  = rgb(96, 96, 96)
 	cHoverBdr = rgb(214, 138, 46)
 )
@@ -56,6 +56,10 @@ var (
 	hoverNBPSec  = -1   // sector whose NBP title is under the mouse
 	showRhythm   = true // rhythm label over the ECG
 	hoverSilAll  bool
+	hoverSound   bool
+	hoverSpeed   bool
+	speedBtn     RECT // top-bar sweep speed button
+	soundBtn     RECT // top-bar sound on/off toggle
 )
 
 // updateHover finds the sector under the mouse (called every timer tick, so
@@ -122,6 +126,14 @@ func drawNumeric(dc uintptr, r RECT, label, val string, c uint32, hi, lo string)
 		text(dc, lo, r.Left+S(6), ly+lim+S(1), r.Left+S(60), ly+2*lim+S(3), c, font(lim, false, "Segoe UI"), DT_SINGLELINE)
 	}
 	big := int32(math.Min(nh*0.72, nw*0.36))
+	// a long value (e.g. a temperature "101.0") must clear the limits at the left
+	avail := int32(nw) - S(6) - S(4)
+	if hi != "" {
+		avail -= S(6) + max(textWidth(dc, hi, font(lim, false, "Segoe UI")), textWidth(dc, lo, font(lim, false, "Segoe UI"))) + S(4)
+	}
+	for big > S(12) && textWidth(dc, val, font(big, false, "Arial")) > avail {
+		big = big * 92 / 100
+	}
 	text(dc, val, r.Left, r.Top, r.Right-S(6), r.Bottom, c, font(big, false, "Arial"), DT_SINGLELINE|DT_VCENTER|DT_RIGHT)
 }
 
@@ -231,15 +243,26 @@ func drawMain(dc uintptr, w, h int32) {
 		silenceAll = RECT{w/2 - bw/2, S(2), w/2 + bw/2, topH - S(3)}
 		flatButton(dc, silenceAll, "Silence All", hoverSilAll, S(13))
 	}
-	snd := "Sound: ON"
-	if !soundOn {
-		snd = "Sound: OFF"
-	}
+	// sound on/off toggle (amber while the sound is off)
 	ix := w/2 + S(70)
-	text(dc, snd, ix, 0, ix+S(90), topH, rgb(180, 180, 185), font(S(12), false, "Segoe UI"), DT_SINGLELINE|DT_VCENTER)
-	text(dc, fmt.Sprintf("%g mm/s", sweepSpeed), ix+S(90), 0, ix+S(170), topH, rgb(180, 180, 185), font(S(12), false, "Segoe UI"), DT_SINGLELINE|DT_VCENTER)
+	soundBtn = RECT{ix, S(2), ix + S(96), topH - S(3)}
+	if soundOn {
+		flatButton(dc, soundBtn, "Sound: ON", hoverSound, S(12))
+	} else {
+		bg := rgb(170, 110, 20)
+		if hoverSound {
+			bg = rgb(200, 135, 30)
+		}
+		fill(dc, soundBtn.Left, soundBtn.Top, soundBtn.Right, soundBtn.Bottom, rgb(230, 170, 70))
+		fill(dc, soundBtn.Left+1, soundBtn.Top+1, soundBtn.Right-1, soundBtn.Bottom-1, bg)
+		text(dc, "Sound: OFF", soundBtn.Left+S(2), soundBtn.Top, soundBtn.Right-S(2), soundBtn.Bottom, rgb(255, 255, 255), font(S(12), true, "Segoe UI"), DT_SINGLELINE|DT_VCENTER|DT_CENTER)
+	}
+	// sweep speed button: opens the speed menu
+	sx := soundBtn.Right + S(8)
+	speedBtn = RECT{sx, S(2), sx + S(150), topH - S(3)}
+	flatButton(dc, speedBtn, fmt.Sprintf("%g / %g mm/s  \u25BE", sweepSpeed, respSpeed()), hoverSpeed, S(12))
 	if showFPS {
-		text(dc, fmt.Sprintf("%.0f fps", fpsVal), ix+S(170), 0, ix+S(240), topH, rgb(255, 200, 90), font(S(12), true, "Segoe UI"), DT_SINGLELINE|DT_VCENTER)
+		text(dc, fmt.Sprintf("%.0f fps", fpsVal), speedBtn.Right+S(10), 0, speedBtn.Right+S(80), topH, rgb(255, 200, 90), font(S(12), true, "Segoe UI"), DT_SINGLELINE|DT_VCENTER)
 	}
 
 	// bottom hint bar
@@ -407,27 +430,16 @@ func drawSector(dc uintptr, bed int, rc RECT, t float64) {
 		kind int // kHR / kSpO2 / kRR / kPulse / kABP / kNBP / kCO2 (waves: ECG=kHR, Pleth=kSpO2, Resp=kRR)
 		wt   float64
 	}
+	// Order, top to bottom: HR (or Pulse without ECG), SpO2, Pulse, RR,
+	// etCO2, Temp, then the blood pressures (ABP, NBP) at the bottom. The ABP wave
+	// is the lowest wave so that its numeric, which lines up with it in the
+	// two-column layout, is the lowest too.
 	var waves, nums []slot
 	if ecgOn {
 		waves = append(waves, slot{kHR, 1.7})
 		nums = append(nums, slot{kHR, 1.0})
 	} else if pulseNum {
 		nums = append(nums, slot{kPulse, 1.0})
-	}
-	if p.Cfg.ABPOn {
-		waves = append(waves, slot{kABP, 1.1})
-		nums = append(nums, slot{kABP, 1.0})
-	}
-	// NBP sits below the resp rate (RR above NBP, as on the monitor)
-	nbpAfterRR := true
-	if p.Cfg.NBPMode != NBPOff && !nbpAfterRR {
-		nums = append(nums, slot{kNBP, 1.0})
-	}
-	if respOn {
-		nums = append(nums, slot{kRR, 0.8})
-	}
-	if p.Cfg.NBPMode != NBPOff && nbpAfterRR {
-		nums = append(nums, slot{kNBP, 1.0})
 	}
 	if spo2On {
 		waves = append(waves, slot{kSpO2, 1.0})
@@ -436,12 +448,25 @@ func drawSector(dc uintptr, bed int, rc RECT, t float64) {
 	if ecgOn && pulseNum {
 		nums = append(nums, slot{kPulse, 0.8})
 	}
+	if respOn {
+		nums = append(nums, slot{kRR, 0.8})
+	}
 	if p.Cfg.CO2On {
 		waves = append(waves, slot{kCO2, 0.9})
 		nums = append(nums, slot{kCO2, 0.9})
 	}
 	if respWave {
 		waves = append(waves, slot{kRR, 0.85})
+	}
+	if p.Cfg.TempOn {
+		nums = append(nums, slot{kTemp, 0.8})
+	}
+	if p.Cfg.ABPOn {
+		waves = append(waves, slot{kABP, 1.1})
+		nums = append(nums, slot{kABP, 1.0})
+	}
+	if p.Cfg.NBPMode != NBPOff {
+		nums = append(nums, slot{kNBP, 1.0})
 	}
 	// more than three numerics: lay them out in two columns
 	ncols := 1
@@ -516,7 +541,7 @@ func drawSector(dc uintptr, bed int, rc RECT, t float64) {
 			text(dc, "Pleth", r.Left+S(3), r.Top+S(1), r.Left+S(80), r.Top+S(1)+fh+S(4), cCyan, lf, DT_SINGLELINE)
 			drawPleth(dc, p, tr)
 		case 2:
-			text(dc, "Resp", r.Left+S(3), r.Top+S(1), r.Left+S(80), r.Top+S(1)+fh+S(4), cPurple, lf, DT_SINGLELINE)
+			text(dc, "Resp", r.Left+S(3), r.Top+S(1), r.Left+S(80), r.Top+S(1)+fh+S(4), cResp, lf, DT_SINGLELINE)
 			drawResp(dc, p, tr)
 		case kABP:
 			text(dc, "ABP", r.Left+S(3), r.Top+S(1), r.Left+S(80), r.Top+S(1)+fh+S(4), cRed, lf, DT_SINGLELINE)
@@ -579,7 +604,14 @@ func drawSector(dc uintptr, bed int, rc RECT, t float64) {
 				drawParamNumeric(dc, col1[i], k, p)
 			}
 		}
-		c2 := split(RECT{mid, num.Top, num.Right, num.Bottom}, rest)
+		// column 2 is stacked from the bottom, so the blood pressure (last)
+		// is always bottom-right; with fewer numerics than column 1 each
+		// keeps a column-1-sized box
+		c2r := RECT{mid, num.Top, num.Right, num.Bottom}
+		if n1 := len(col1); n1 > len(rest) && len(rest) > 0 {
+			c2r.Top = num.Bottom - (num.Bottom-num.Top)*int32(len(rest))/int32(n1)
+		}
+		c2 := split(c2r, rest)
 		for i, n := range rest {
 			drawParamNumeric(dc, c2[i], n.kind, p)
 		}

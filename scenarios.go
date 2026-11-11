@@ -35,6 +35,13 @@ func RandomConfig(r *rand.Rand, name string) Config {
 	if r.Float64() < 0.2 {
 		c.CO2On, c.EtCO2 = true, int(gauss(r, 38, 8, 15, 70))
 	}
+	tempP := 0.15
+	if c.ABPOn && c.CO2On {
+		tempP += 0.40
+	}
+	if r.Float64() < tempP {
+		c.TempOn, c.Temp = true, randomTemp(r, 0.3)
+	}
 	// any rhythm; now and then a patient with the leads off, and a few whose
 	// electrodes come off intermittently
 	c.Rhythm = Rhythm(1 + r.Intn(int(RCount)-1))
@@ -127,13 +134,14 @@ var UnitNames = []string{"ED", "Med-surg tele", "Step-down", "ICU"}
 type UnitOdds struct {
 	SpO2, NBP, ABP, CO2, Artifact float64
 	LeadsOff                      float64 // electrodes come off now and then
+	Temp                          float64 // temperature probe
 }
 
 var Odds = [UnitCount]UnitOdds{
-	UnitED:       {SpO2: 75, NBP: 85, ABP: 1, CO2: 1, Artifact: 20, LeadsOff: 8},
-	UnitMedSurg:  {SpO2: 0, NBP: 0, ABP: 0, CO2: 0, Artifact: 28, LeadsOff: 15},
-	UnitStepdown: {SpO2: 90, NBP: 90, ABP: 6, CO2: 5, Artifact: 15, LeadsOff: 8},
-	UnitICU:      {SpO2: 98, NBP: 75, ABP: 45, CO2: 30, Artifact: 12, LeadsOff: 4},
+	UnitED:       {SpO2: 92, NBP: 85, ABP: 1, CO2: 1, Artifact: 20, LeadsOff: 8, Temp: 1},
+	UnitMedSurg:  {SpO2: 0, NBP: 0, ABP: 0, CO2: 0, Artifact: 28, LeadsOff: 15, Temp: 0},
+	UnitStepdown: {SpO2: 97, NBP: 90, ABP: 6, CO2: 5, Artifact: 15, LeadsOff: 8, Temp: 4},
+	UnitICU:      {SpO2: 98, NBP: 75, ABP: 45, CO2: 30, Artifact: 12, LeadsOff: 4, Temp: 35},
 }
 
 type unitProfile struct {
@@ -234,6 +242,10 @@ func UnitConfig(r *rand.Rand, name string, unit int) Config {
 		default:
 			c.SpO2 = randIn(r, 94, 100)
 		}
+	} else if unit == UnitED || unit == UnitStepdown {
+		// every ED and step-down patient has a pulse oximeter: those who would
+		// not be monitored have the sensor unplugged (SpO2 Sensor Off)
+		c.SpO2On = SpO2SensorOff
 	} else if od.SpO2 > 0 && r.Float64() < 0.05 { // (units without pulse oximetry never show it)
 		c.SpO2On = SpO2SensorOff
 	}
@@ -241,6 +253,9 @@ func UnitConfig(r *rand.Rand, name string, unit int) Config {
 		c.Rate = randIn(r, e.lo, e.hi)
 	}
 	c.Tune = naturalTune(r, c)
+	if unit == UnitED && c.SpO2On == SpO2Monitored {
+		c.Tune.PlethDamp = probeDamping(r)
+	}
 	// a wide QRS on a conducted rhythm is usually a bundle branch block
 	if c.Tune.QRSms >= 120 && UsesConduction(c.Rhythm) && r.Float64() < 0.8 {
 		c.Conduction = CondRBBB
@@ -255,6 +270,10 @@ func UnitConfig(r *rand.Rand, name string, unit int) Config {
 	if chance(od.NBP) {
 		c.NBPMode = NBPAuto
 		c.NBPInterval = pr.nbpIntervals[r.Intn(len(pr.nbpIntervals))]
+	} else if unit == UnitED || unit == UnitStepdown {
+		// every ED and step-down patient has a cuff: those not on an auto
+		// cycle are in manual mode, with a blank reading until measured
+		c.NBPMode = NBPManual
 	}
 	if chance(od.ABP) { // arterial line
 		c.ABPOn = true
@@ -263,6 +282,16 @@ func UnitConfig(r *rand.Rand, name string, unit int) Config {
 	if chance(od.CO2) { // capnography (sedation, PCA, respiratory concern)
 		c.CO2On = true
 		c.EtCO2 = int(gauss(r, 38, 5, 25, 55))
+	}
+	// continuous temperature probe (often because of a fever); a patient with
+	// both an arterial line and capnography is sicker and 40 percentage points
+	// more likely to have one
+	tempOdds := od.Temp
+	if c.ABPOn && c.CO2On {
+		tempOdds += 40
+	}
+	if chance(tempOdds) {
+		c.TempOn, c.Temp = true, randomTemp(r, 0.2)
 	}
 	// a few patients' electrodes come off now and then
 	c.LeadsOffEp = e.rhythm != RLeadsOff && chance(od.LeadsOff)
@@ -298,6 +327,36 @@ func UnitConfig(r *rand.Rand, name string, unit int) Config {
 		c.Ectopy, c.Pattern, c.Freq = EctPSVT, PatOccasional, randIn(r, 2, 6)
 	}
 	return c
+}
+
+// probeDamping picks where an ED patient's pulse oximeter probe is, as a
+// pleth damping percentage: mostly a finger (a crisp waveform, sometimes a
+// little damped by cold hands or poor perfusion), sometimes an ear clip or a
+// nose sensor, which give a smaller, rounder, more damped waveform.
+func probeDamping(r *rand.Rand) int {
+	switch x := r.Float64(); {
+	case x < 0.70: // finger
+		return int(gauss(r, 0, 6, 0, 15))
+	case x < 0.80: // cold or poorly perfused finger
+		return randIn(r, 20, 40)
+	case x < 0.94: // ear
+		return randIn(r, 40, 60)
+	default: // nose
+		return randIn(r, 60, 80)
+	}
+}
+
+// randomTemp draws a patient temperature (°C): mostly normal, a fever with
+// the given chance, and now and then a low temperature.
+func randomTemp(r *rand.Rand, fever float64) float64 {
+	x := r.Float64()
+	switch {
+	case x < fever:
+		return math.Round(gauss(r, 38.6, 0.5, 38.1, 40.2)*10) / 10
+	case x < fever+0.05:
+		return math.Round(gauss(r, 35.5, 0.3, 34.5, 35.9)*10) / 10
+	}
+	return math.Round(gauss(r, 36.9, 0.3, 36.2, 37.6)*10) / 10
 }
 
 // gauss returns a normal deviate clamped to [lo, hi].

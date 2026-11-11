@@ -30,7 +30,7 @@ func openAbout() {
 		call(pSetForegroundWindow, aboutHwnd)
 		return
 	}
-	w, h := S(440), S(380)
+	w, h := S(440), S(360)
 	var mr RECT
 	call(pGetWindowRect, mainHwnd, uintptr(unsafe.Pointer(&mr)))
 	x := mr.Left + (mr.Right-mr.Left-w)/2
@@ -57,8 +57,6 @@ func drawAbout(dc uintptr, w, h int32) {
 	y += S(8)
 	centre("Vibe-coded by Jeffrey Olvesen", S(26), rgb(0, 0, 0), font(S(16), false, "Segoe UI"))
 	centre("Licensed under the GNU GPL v3", S(26), rgb(0, 0, 0), font(S(16), false, "Segoe UI"))
-	y += S(4)
-	centre("For education and training only. Not a medical device.", S(22), rgb(120, 120, 120), font(S(13), false, "Segoe UI"))
 
 	smiley(dc, w/2, h-S(16))
 }

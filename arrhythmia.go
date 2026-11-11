@@ -784,22 +784,29 @@ func (p *Patient) arrhythmiaAlarms(now float64, lm AlarmLimits) []cand {
 			}
 		}
 		switch {
-		case pacedN*2 >= min(n, 8) && n > 0:
+		case IsPaced(r) || pacedN*2 >= min(n, 8) && n > 0: // any paced rhythm
 			p.RhythmStatus = "Paced Rhythm"
 		case r == RAfib:
 			p.RhythmStatus = "Atrial Fib"
 		case irr:
 			p.RhythmStatus = "Irregular HR"
 		default:
-			base := "SV"
-			if hasPWaves(r) && p.psvtEnd == 0 { // (no P waves during a PSVT episode)
-				base = "Sinus"
-			}
-			cat := base + " Rhythm"
-			if p.HR > 100 {
-				cat = base + " Tachy"
-			} else if p.HR > 0 && p.HR < 60 {
-				cat = base + " Brady"
+			// a regular rhythm: sinus when P waves are seen, otherwise SV
+			// (junctional, SVT, flutter, PSVT): Sinus Rhythm / Sinus Brady /
+			// Sinus Tach, SV Rhythm / SV Brady / SV Tachy
+			cat := "SV Rhythm"
+			switch {
+			case hasPWaves(r) && p.psvtEnd == 0: // (no P waves during a PSVT episode)
+				cat = "Sinus Rhythm"
+				if p.HR > 100 {
+					cat = "Sinus Tach"
+				} else if p.HR > 0 && p.HR < 60 {
+					cat = "Sinus Brady"
+				}
+			case p.HR > 100:
+				cat = "SV Tachy"
+			case p.HR > 0 && p.HR < 60:
+				cat = "SV Brady"
 			}
 			// the HR must be in the new range for five beats
 			nb := 0

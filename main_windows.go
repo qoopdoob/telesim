@@ -33,7 +33,7 @@ var (
 	strips     = map[uintptr]*Strip{}
 	standby    [maxBeds]bool
 	acks       [maxBeds]ackState // acknowledged (silenced) alarm per bed
-	colsSet    = 3               // 0 = auto
+	colsSet    = 2               // 0 = auto
 	silenceAll RECT              // top-bar "Silence All" button
 	anyAudible bool
 )
@@ -95,36 +95,42 @@ func bedLabel(i int) string { return fmt.Sprintf("Bed %d", i+1) }
 
 // Menu IDs
 const (
-	idExit      = 100
-	idResetAll  = 101
-	idHelp      = 102
-	idSetupBase = 110 // +bed
-	idBedsBase  = 200 // +count
-	idAlarms    = 300
-	idAllOn     = 103
-	idAllOff    = 104
-	idRandom    = 105
-	idERMix     = 106
-	idSilAll    = 107
-	idLimits    = 108
-	idMedSurg   = 130
-	idStepdown  = 131
-	idOdds      = 132
-	idICU       = 133
-	idSound     = 310
-	idFPS       = 311
-	idRhyLbl    = 312
-	idNumAlarm  = 313
-	idLatchBase = 340 // +0..5
-	idHRStd     = 314
-	idEvents    = 315
-	idQuiz      = 316
-	idVolBase   = 320 // +0..2
-	idColsBase  = 400 // +0 auto, +1..4
-	idSpeedBase = 600 // +0..2
+	idExit          = 100
+	idResetAll      = 101
+	idHelp          = 102
+	idSetupBase     = 110 // +bed
+	idBedsBase      = 200 // +count
+	idAlarms        = 300
+	idAllOn         = 103
+	idAllOff        = 104
+	idRandom        = 105
+	idERMix         = 106
+	idSilAll        = 107
+	idLimits        = 108
+	idMedSurg       = 130
+	idStepdown      = 131
+	idOdds          = 132
+	idICU           = 133
+	idSound         = 310
+	idFPS           = 311
+	idRhyLbl        = 312
+	idNumAlarm      = 313
+	idLatchBase     = 340 // +0..5
+	idHRStd         = 314
+	idEvents        = 315
+	idQuiz          = 316
+	idTempF         = 318
+	idTempC         = 319
+	idVolBase       = 320 // +0..2
+	idColsBase      = 400 // +0 auto, +1..4
+	idSpeedBase     = 600 // +0..3
+	idRespSpeedBase = 610 // +0..3
 )
 
-var sweepSpeeds = []float64{12.5, 25, 50}
+var (
+	sweepSpeeds = []float64{6.25, 12.5, 25, 50}    // ECG, Pleth, ABP
+	respSpeeds  = []float64{3.125, 6.25, 12.5, 25} // Resp, CO2
+)
 
 var (
 	latchMenu  uintptr
@@ -243,13 +249,12 @@ func buildMenu() {
 		call(pAppendMenuW, viewMenu, MF_STRING, uintptr(idColsBase+c), uintptr(unsafe.Pointer(wstr(lbl))))
 	}
 	call(pAppendMenuW, viewMenu, MF_SEPARATOR, 0, 0)
-	for i, sp := range sweepSpeeds {
-		lbl := fmt.Sprintf("Sweep speed: %g mm/s (resp %g mm/s)", sp, sp/4)
-		if sp == 25 {
-			lbl += "  - standard"
-		}
-		call(pAppendMenuW, viewMenu, MF_STRING, uintptr(idSpeedBase+i), uintptr(unsafe.Pointer(wstr(lbl))))
-	}
+	speedMenu = call(pCreatePopupMenu)
+	addSpeedItems(speedMenu)
+	call(pAppendMenuW, viewMenu, MF_POPUP, speedMenu, uintptr(unsafe.Pointer(wstr("Sweep speed"))))
+	call(pAppendMenuW, viewMenu, MF_SEPARATOR, 0, 0)
+	call(pAppendMenuW, viewMenu, MF_STRING, idTempF, uintptr(unsafe.Pointer(wstr("Temperature in °F"))))
+	call(pAppendMenuW, viewMenu, MF_STRING, idTempC, uintptr(unsafe.Pointer(wstr("Temperature in °C"))))
 	call(pAppendMenuW, viewMenu, MF_SEPARATOR, 0, 0)
 	call(pAppendMenuW, viewMenu, MF_STRING, idRhyLbl, uintptr(unsafe.Pointer(wstr("Show rhythm labels"))))
 	call(pAppendMenuW, viewMenu, MF_STRING, idFPS, uintptr(unsafe.Pointer(wstr("Show frame rate"))))
@@ -319,13 +324,12 @@ func updateChecks() {
 		f = MF_CHECKED
 	}
 	call(pCheckMenuItem, viewMenu, idFPS, f)
-	for i, sp := range sweepSpeeds {
-		f := uintptr(0)
-		if sp == sweepSpeed {
-			f = MF_CHECKED
-		}
-		call(pCheckMenuItem, viewMenu, uintptr(idSpeedBase+i), f)
+	tf, tc := uintptr(MF_CHECKED), uintptr(0)
+	if !TempF {
+		tf, tc = 0, MF_CHECKED
 	}
+	call(pCheckMenuItem, viewMenu, idTempF, tf)
+	call(pCheckMenuItem, viewMenu, idTempC, tc)
 	f = 0
 	if soundOn {
 		f = MF_CHECKED
@@ -364,25 +368,8 @@ func updateAlarmState() {
 	anyAudible = false
 	for i := 0; i < maxBeds; i++ {
 		p := patients[i]
-		// An acknowledged alarm stays paused (and its message frozen) until the
-		// condition clears or a HIGHER-priority alarm appears (e.g. yellow -> red).
-		// The condition must stay clear for 5 s (values hovering at a limit
-		// shouldn't re-arm it); escalation re-arms immediately.
-		if acks[i].on {
-			switch {
-			case alarmRank(p.AlarmLvl) > acks[i].rank, p.RemindAt > acks[i].at:
-				// escalation, or an arrhythmia alarm reminder after its timeout
-				acks[i] = ackState{}
-			case p.AlarmText == "":
-				if acks[i].clearSince == 0 {
-					acks[i].clearSince = now()
-				} else if now()-acks[i].clearSince >= 5 {
-					acks[i] = ackState{}
-				}
-			default:
-				acks[i].clearSince = 0
-			}
-		}
+		// acknowledged alarms: see ack.go
+		acks[i].update(p, now())
 		// short yellow (arrhythmia) alarms sound only briefly when announced
 		// short yellow (arrhythmia) alarms sound only briefly; latched alarms
 		// sound only with audible latching (ToneLvl = 0 when silent)
@@ -433,16 +420,6 @@ func chooseLead(hwnd uintptr, bed int, r RECT) {
 	}
 }
 
-// ackState is an acknowledged alarm: the message and level shown at the
-// moment it was silenced.
-type ackState struct {
-	on         bool
-	text       string
-	lvl, rank  int
-	clearSince float64 // when the condition went away (0 = still present)
-	at         float64 // when it was acknowledged
-}
-
 // alarmRank orders alarm levels by priority (panic > red > yellow > short yellow > INOP).
 func alarmRank(lvl int) int { return AlarmRank(lvl) }
 
@@ -462,7 +439,7 @@ func silenceBed(i int) {
 		p.LogEvent("Alarm acknowledged: "+p.AlarmText, 4)
 		p.Acknowledge() // latched red / yellow arrhythmia alarms whose condition ended clear now
 		if p.AlarmText != "" {
-			acks[i] = ackState{on: true, text: p.AlarmText, lvl: p.AlarmLvl, rank: alarmRank(p.AlarmLvl), at: now()}
+			acks[i] = acknowledge(p, now())
 		}
 	}
 	forceSound = true // pressing Silence takes effect immediately
@@ -505,7 +482,7 @@ MX100/X3 Instructions for Use, "Patient Alarms and INOPs")
   alarms * (e.g. * Pair PVCs, * AFIB, * HR High) and cyan INOPs (e.g.
   ECG Leads Off, SpO2 No Pulse, NBP Measure Failed).
 - Alarm text Enhanced (Alarms menu): worst value and limit, e.g.
-  *** Desat 78 < 80, *** xBrady 35<40, *** Apnea 0:25. Several alarms of
+  *** Desat 86 < 90, *** xBrady 35<40, *** Apnea 0:25. Several alarms of
   the top priority alternate every 2 s.
 - Alarm latching (Alarms menu, as configured on the monitor): visual and
   audible latching Red Only / Red&Yellow / Off. A latched alarm keeps its
@@ -662,6 +639,8 @@ func mainProc(hwnd, msg, wp, lp uintptr) uintptr {
 		updateHover(hwnd)
 		x, y := lpX(lp), lpY(lp)
 		hoverSilAll = silenceAll.contains(x, y)
+		hoverSound = soundBtn.contains(x, y)
+		hoverSpeed = speedBtn.contains(x, y)
 		return 0
 	case WM_SETCURSOR:
 		if loword(lp) == HTCLIENT {
@@ -669,7 +648,7 @@ func mainProc(hwnd, msg, wp, lp uintptr) uintptr {
 			call(pGetCursorPos, uintptr(unsafe.Pointer(&pt)))
 			call(pScreenToClient, hwnd, uintptr(unsafe.Pointer(&pt)))
 			cur := uintptr(IDC_ARROW)
-			if silenceAll.contains(pt.X, pt.Y) {
+			if silenceAll.contains(pt.X, pt.Y) || soundBtn.contains(pt.X, pt.Y) || speedBtn.contains(pt.X, pt.Y) {
 				cur = IDC_HAND
 			}
 			for _, s := range sectors {
@@ -691,6 +670,15 @@ func mainProc(hwnd, msg, wp, lp uintptr) uintptr {
 			for i := 0; i < maxBeds; i++ {
 				silenceBed(i)
 			}
+			return 0
+		}
+		if soundBtn.contains(x, y) {
+			toggleSound()
+			call(pInvalidateRect, hwnd, 0, 0)
+			return 0
+		}
+		if speedBtn.contains(x, y) {
+			chooseSpeed(hwnd, speedBtn)
 			return 0
 		}
 		handleSectorClick(hwnd, x, y)
@@ -802,9 +790,7 @@ func mainProc(hwnd, msg, wp, lp uintptr) uintptr {
 				p.computeHR(t)
 			}
 		case id == idSound:
-			soundOn = !soundOn
-			updateChecks()
-			updateAlarmState()
+			toggleSound()
 		case id >= idVolBase && id < idVolBase+3:
 			volumeIdx = id - idVolBase
 			setAlarmSound(sndNone)
@@ -817,9 +803,9 @@ func mainProc(hwnd, msg, wp, lp uintptr) uintptr {
 		case id == idFPS:
 			showFPS = !showFPS
 			updateChecks()
-		case id >= idSpeedBase && id < idSpeedBase+len(sweepSpeeds):
-			sweepSpeed = sweepSpeeds[id-idSpeedBase]
-			updateChecks()
+		case id == idTempF || id == idTempC:
+			setTempUnit(id == idTempF)
+		case speedCommand(id):
 		case id >= idColsBase && id <= idColsBase+4:
 			colsSet = id - idColsBase
 			updateChecks()
@@ -841,13 +827,66 @@ func mainProc(hwnd, msg, wp, lp uintptr) uintptr {
 // ---- sweep speed (real-world mm/s on the physical screen) ----
 
 var (
-	sweepSpeed = 25.0 // ECG and SpO2, mm/s (Philips default)
+	sweepSpeed = 25.0 // ECG, Pleth and ABP, mm/s (Philips default)
+	respSpeedV = 6.25 // Resp and CO2, mm/s (Philips default)
 	pxPerMM    = 96 / 25.4
 	lastCal    float64
 )
 
-// respSpeed: respiration sweeps at a quarter of the ECG speed (6.25 mm/s at 25).
-func respSpeed() float64 { return sweepSpeed / 4 }
+// respSpeed is the sweep speed of the Resp and CO2 waves.
+func respSpeed() float64 { return respSpeedV }
+
+// chooseSpeed pops up the sweep speed menu under the top-bar speed button.
+func chooseSpeed(hwnd uintptr, r RECT) {
+	m := call(pCreatePopupMenu)
+	addSpeedItems(m)
+	pt := POINT{r.Left, r.Bottom}
+	call(pClientToScreen, hwnd, uintptr(unsafe.Pointer(&pt)))
+	id := int(call(pTrackPopupMenu, m, 0x0100|0x0080, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0))
+	call(pDestroyMenu, m)
+	speedCommand(id)
+}
+
+// addSpeedItems adds the ECG and resp speed choices (checked) to a menu.
+func addSpeedItems(m uintptr) {
+	for i, sp := range sweepSpeeds {
+		lbl := fmt.Sprintf("ECG / Pleth / ABP: %g mm/s", sp)
+		if sp == 25 {
+			lbl += "  (standard)"
+		}
+		f := uintptr(MF_STRING)
+		if sp == sweepSpeed {
+			f |= MF_CHECKED
+		}
+		call(pAppendMenuW, m, f, uintptr(idSpeedBase+i), uintptr(unsafe.Pointer(wstr(lbl))))
+	}
+	call(pAppendMenuW, m, MF_SEPARATOR, 0, 0)
+	for i, sp := range respSpeeds {
+		lbl := fmt.Sprintf("Resp / CO\u2082: %g mm/s", sp)
+		if sp == 6.25 {
+			lbl += "  (standard)"
+		}
+		f := uintptr(MF_STRING)
+		if sp == respSpeedV {
+			f |= MF_CHECKED
+		}
+		call(pAppendMenuW, m, f, uintptr(idRespSpeedBase+i), uintptr(unsafe.Pointer(wstr(lbl))))
+	}
+}
+
+// speedCommand handles a speed menu choice; false if id is not one.
+func speedCommand(id int) bool {
+	switch {
+	case id >= idSpeedBase && id < idSpeedBase+len(sweepSpeeds):
+		sweepSpeed = sweepSpeeds[id-idSpeedBase]
+	case id >= idRespSpeedBase && id < idRespSpeedBase+len(respSpeeds):
+		respSpeedV = respSpeeds[id-idRespSpeedBase]
+	default:
+		return false
+	}
+	rebuildSpeedMenu()
+	return true
+}
 
 // calibrate reads the monitor's physical pixel density so 25 mm/s on screen
 // really is 25 mm per second. Rechecked every few seconds (window may move
@@ -946,7 +985,7 @@ func drawResp(dc uintptr, p *Patient, r RECT) {
 	wh := float64(r.Bottom - r.Top)
 	yb := float64(r.Bottom) - wh*0.18
 	scale := wh * 0.6
-	sweepTrace(dc, p, r, func(k int64) float64 { return yb - float64(p.RespAt(k))*scale }, cPurple, respSpeed())
+	sweepTrace(dc, p, r, func(k int64) float64 { return yb - float64(p.RespAt(k))*scale }, cResp, respSpeed())
 }
 
 // sweepPts is reused for every trace to avoid per-frame allocations.
@@ -1210,3 +1249,35 @@ func drawStrip(dc uintptr, s *Strip, w, h int32) {
 		line(dc, x, int32(gt), x, pts[i].Y, sp)
 	}
 }
+
+// toggleSound switches the alarm sound on or off (top-bar button or the
+// Alarms menu).
+func toggleSound() {
+	soundOn = !soundOn
+	updateChecks()
+	updateAlarmState()
+}
+
+// setTempUnit switches the temperature display between °F and °C.
+func setTempUnit(f bool) {
+	TempF = f
+	updateChecks()
+	if limitsHwnd != 0 { // the open limits table shows temperatures in the old unit
+		closeLimits()
+	}
+}
+
+var speedMenu uintptr // View > Sweep speed
+
+// rebuildSpeedMenu refreshes the check marks in View > Sweep speed.
+func rebuildSpeedMenu() {
+	for call(pGetMenuItemCount, speedMenu) > 0 {
+		call(pDeleteMenu, speedMenu, 0, 0x400) // MF_BYPOSITION
+	}
+	addSpeedItems(speedMenu)
+}
+
+var (
+	pGetMenuItemCount = user32.NewProc("GetMenuItemCount")
+	pDeleteMenu       = user32.NewProc("DeleteMenu")
+)

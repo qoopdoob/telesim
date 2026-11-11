@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -117,9 +118,12 @@ type AlarmLimits struct {
 	STHigh, STLow        float64 // mm
 	QTcHigh              int     // ms
 	NBPsHigh, NBPsLow    int
+	NBPdHigh, NBPdLow    int // diastolic
 	ABPsHigh, ABPsLow    int
+	ABPdHigh, ABPdLow    int // diastolic
 	ABPsXHigh, ABPsXLow  int // extreme (red) limits
 	EtCO2High, EtCO2Low  int
+	TempHigh, TempLow    float64 // °C
 	// arrhythmia alarm limits
 	VTachHR, VTachRun     int
 	VentRhythmRun         int
@@ -130,10 +134,15 @@ type AlarmLimits struct {
 	ArrOff                uint32 // arrhythmia alarms switched off (bits of ArrSwitches)
 }
 
-// Limits are the station-wide limits (IntelliVue adult factory defaults).
-var Limits = AlarmLimits{HRLow: 50, HRHigh: 120, ExtBradyD: 20, ExtTachyD: 20, SpO2Low: 90, Desat: 80, SpO2High: 100,
+// Limits are the station-wide default limits (as configured on the unit's
+// IntelliVue monitors): HR and pulse 50-120 (extreme brady 40 / extreme
+// tachy 140), SpO2 low 95 % with desat 90 %, RR 8-30 with 20 s apnea,
+// NBP and ABP systolic 90-180 and diastolic 40-100 (ABP extremes 70 / 200),
+// etCO2 35-45, temperature 36.0-38.0 °C (96.8-100.4 °F).
+var Limits = AlarmLimits{HRLow: 50, HRHigh: 120, ExtBradyD: 20, ExtTachyD: 20, SpO2Low: 95, Desat: 90, SpO2High: 100,
 	RRLow: 8, RRHigh: 30, ApneaSec: 20, STHigh: 2, STLow: -2, QTcHigh: 500,
-	NBPsHigh: 160, NBPsLow: 90, ABPsHigh: 160, ABPsLow: 90, ABPsXHigh: 200, ABPsXLow: 70, EtCO2High: 50, EtCO2Low: 30,
+	NBPsHigh: 180, NBPsLow: 90, NBPdHigh: 100, NBPdLow: 40,
+	ABPsHigh: 180, ABPsLow: 90, ABPdHigh: 100, ABPdLow: 40, ABPsXHigh: 200, ABPsXLow: 70, EtCO2High: 45, EtCO2Low: 35, TempHigh: 38.0, TempLow: 36.0,
 	VTachHR: 100, VTachRun: 5, VentRhythmRun: 14, SVTHR: 180, SVTRun: 5, PVCsMin: 10,
 	AsystoleSec: 4, PauseSec: 2, AfEndDelay: 60}
 
@@ -341,7 +350,9 @@ type Config struct {
 	ABPOn          bool
 	ABPSys, ABPDia int
 	CO2On          bool
-	EtCO2          int // end-tidal CO2 (mmHg)
+	EtCO2          int     // end-tidal CO2 (mmHg)
+	TempOn         bool    // temperature probe
+	Temp           float64 // patient's true temperature (°C; 0 = 37.0)
 }
 
 // Artifact types
@@ -374,6 +385,7 @@ type Tune struct {
 	PRms, QRSms, QTms  int
 	PAmp, QRSAmp, TAmp int     // percent (100 = normal; negative T = inverted)
 	STmm               float64 // ST elevation (+) / depression (-) in mm at 10 mm/mV
+	PlethDamp          int     // pleth damping, percent: 0 = finger probe, ~50 ear, ~70 nose
 }
 
 func DefaultTune() Tune { return Tune{Set: true, PAmp: 100, QRSAmp: 100, TAmp: 100} }
@@ -448,6 +460,14 @@ type Patient struct {
 	// respiration
 	breathStart, breathPer, nextBreath, breathAmp float64
 	breathF, breathEt                             float64 // this breath: inspiratory fraction, etCO2 factor
+	breathK                                       float64 // this breath: expiratory decay
+	breathing                                     bool    // false while apneic after a cardiac arrest
+	gasp                                          bool    // this breath is an agonal gasp
+	// cardiac arrest: arrestT0 is when the pulse stopped (NaN while
+	// perfusing); breathing goes on until arrestGasp, agonal gasps until
+	// arrestApnea, then apnea. After a pulse returns, breathing resumes at
+	// roscBreath.
+	arrestT0, arrestGasp, arrestApnea, roscBreath float64
 	// the patient's own breathing pattern (set once per patient)
 	respIE, respK, respDepth, respBaseT, respBasePh float64
 	respDrift                                       float64 // slowly varying breath-to-breath state
@@ -470,6 +490,7 @@ type Patient struct {
 	flN                 int
 	flFreq              float64
 	switchT             float64
+	respT0              float64 // when the breathing settings were last changed
 	ph                  [6]float64
 
 	startT float64
@@ -488,8 +509,9 @@ type Patient struct {
 	HRValid    bool
 	Pulse      int // pulse rate from SpO2 (0 = none)
 	lastHRUpd  float64
-	AlarmText  string // displayed message (e.g. "***DESAT 78<80")
-	AlarmKey   string // text form of the alarm (stable identity)
+	AlarmText  string   // displayed message (e.g. "***DESAT 78<80")
+	AlarmKey   string   // text form of the alarm (stable identity)
+	AlarmKeys  []string // every alarm active now (AlarmKey is the one shown)
 	AlarmLvl   int
 	AlarmFresh bool  // condition present and unacknowledged (blue sector)
 	ToneLvl    int   // level of the highest alarm that is (still) sounding (0 = silent)
@@ -502,6 +524,8 @@ type Patient struct {
 	worst     map[string]int         // worst values for the Enhanced alarm text
 	worstSeen map[string]bool
 	co2Breath float64 // first breath seen by the capnograph
+	// temperature: the probe reading follows the patient's temperature slowly
+	tempVal, tempDrift, tempT float64
 
 	learnPending bool    // start an arrhythmia learning phase at the next analysis
 	leadsOffAt   float64 // when Leads Off began
@@ -531,7 +555,8 @@ func NewPatient(cfg Config, now float64, seed int64) *Patient {
 	p.respDepth = 0.85 + 0.3*r.Float64() // typical tidal depth
 	p.respBaseT = 30 + 30*r.Float64()    // slow baseline (FRC) drift period
 	p.respBasePh = 2 * math.Pi * r.Float64()
-	p.breathF, p.breathEt = p.respIE, 1
+	p.breathF, p.breathEt, p.breathK, p.breathing = p.respIE, 1, p.respK, true
+	p.arrestT0, p.roscBreath = math.NaN(), math.Inf(-1)
 	p.perf, p.perfTarget = 1, 1
 	p.startT = now - 12
 	p.lastV = p.startT - 10
@@ -631,6 +656,9 @@ func (p *Patient) Apply(cfg Config, t float64) {
 	if cfg.ABPSys == 0 {
 		cfg.ABPSys, cfg.ABPDia = 120, 70
 	}
+	if cfg.Temp == 0 {
+		cfg.Temp = 37.0
+	}
 	if cfg.EtCO2 == 0 {
 		cfg.EtCO2 = 38
 	}
@@ -654,6 +682,9 @@ func (p *Patient) Apply(cfg Config, t float64) {
 	}
 	if !UsesConduction(cfg.Rhythm) {
 		cfg.Conduction = CondNormal
+	}
+	if p.respT0 == 0 || cfg.RR != p.Cfg.RR || cfg.Apnea != p.Cfg.Apnea || cfg.RespRateOff != p.Cfg.RespRateOff {
+		p.respT0 = t // the apnea timer restarts when breathing is (re)set up
 	}
 	p.Cfg = cfg
 	p.sh = cfg.Tune.shape()
@@ -746,7 +777,7 @@ func (p *Patient) beat(t float64, k kind, v uint8, amp float64) {
 		// QRS height sways with breathing (electrical axis shifts as the
 		// chest moves) plus a little random beat-to-beat variation
 		ph := 0.0
-		if p.breathPer > 0 {
+		if p.breathPer > 0 && p.breathing {
 			ph = 2 * math.Pi * (t - p.breathStart) / p.breathPer
 		}
 		amp *= 1 + 0.07*math.Sin(ph) + 0.025*p.rng.NormFloat64()
@@ -1563,6 +1594,10 @@ func (p *Patient) computeHR(now float64) {
 			add("** NBPs High", fmt.Sprintf("** NBPs %d>%d", p.NBPSys, lm.NBPsHigh), 2, 300)
 		case p.NBPValid && p.NBPSys < lm.NBPsLow:
 			add("** NBPs Low", fmt.Sprintf("** NBPs %d<%d", p.NBPSys, lm.NBPsLow), 2, 300)
+		case p.NBPValid && p.NBPDia > lm.NBPdHigh:
+			add("** NBPd High", fmt.Sprintf("** NBPd %d>%d", p.NBPDia, lm.NBPdHigh), 2, 300)
+		case p.NBPValid && p.NBPDia < lm.NBPdLow:
+			add("** NBPd Low", fmt.Sprintf("** NBPd %d<%d", p.NBPDia, lm.NBPdLow), 2, 300)
 		}
 	}
 	// ABP: extreme limits are red, normal limits yellow
@@ -1579,6 +1614,10 @@ func (p *Patient) computeHR(now float64) {
 			add("** ABPs High", "** ABPs "+hi("abphi", p.ABPSys, lm.ABPsHigh), 2, 300)
 		case p.ABPSys < lm.ABPsLow:
 			add("** ABPs Low", "** ABPs "+lo("abplo", p.ABPSys, lm.ABPsLow), 2, 300)
+		case p.ABPDia > lm.ABPdHigh:
+			add("** ABPd High", "** ABPd "+hi("abpdhi", p.ABPDia, lm.ABPdHigh), 2, 300)
+		case p.ABPDia < lm.ABPdLow:
+			add("** ABPd Low", "** ABPd "+lo("abpdlo", p.ABPDia, lm.ABPdLow), 2, 300)
 		}
 	}
 	// CO2: alarms are suppressed until the first breath is detected
@@ -1606,6 +1645,22 @@ func (p *Patient) computeHR(now float64) {
 		}
 	} else {
 		p.co2Breath = 0
+	}
+
+	// Temperature
+	src = MeasTemp
+	if p.Cfg.TempOn && p.TempValid {
+		v10 := int(math.Round(TempOut(p.TempDisp) * 10))
+		hi10 := int(math.Round(TempOut(lm.TempHigh) * 10))
+		lo10 := int(math.Round(TempOut(lm.TempLow) * 10))
+		f := func(x int) string { return strconv.FormatFloat(float64(x)/10, 'f', 1, 64) }
+		u := TempUnit() // the worst value is kept per display unit
+		switch {
+		case p.hold("temphi", v10 > hi10, 5, now):
+			add("** Temp High", "** Temp "+f(p.worstVal("temphi"+u, v10, false))+">"+f(hi10), 2, 300)
+		case p.hold("templo", v10 < lo10, 5, now):
+			add("** Temp Low", "** Temp "+f(p.worstVal("templo"+u, v10, true))+"<"+f(lo10), 2, 300)
+		}
 	}
 
 	// Alarms switched off for one measurement: its patient alarms are not
@@ -1676,6 +1731,10 @@ func (p *Patient) computeHR(now float64) {
 
 	p.recordHistory(cs, now) // (also when nothing is alarming)
 	p.AlarmText, p.AlarmKey, p.AlarmLvl, p.AlarmFresh, p.ToneLvl = "", "", 0, false, 0
+	p.AlarmKeys = p.AlarmKeys[:0]
+	for _, c := range cs {
+		p.AlarmKeys = append(p.AlarmKeys, c.text)
+	}
 	if len(cs) == 0 {
 		return
 	}
@@ -1703,6 +1762,9 @@ const (
 	MeasABP
 	MeasCO2
 )
+
+// MeasTemp is the temperature measurement (after MeasArrhy, which is UI only).
+const MeasTemp = 7
 
 // HistEntry is one line of the alarm review. Red and yellow patient alarms
 // also keep the 10-second ECG strip around their onset (6 s before to 4 s
@@ -1790,30 +1852,60 @@ func (p *Patient) respValue(t float64) float64 {
 	if p.LeadsOff() {
 		return 0 // impedance resp is measured through the ECG electrodes
 	}
-	x := (t - p.breathStart) / p.breathPer
-	f := p.breathF
 	var v float64
-	if x < f { // inspiration: smooth rise, a little faster at the start
-		u := x / f
-		v = 0.5 - 0.5*math.Cos(math.Pi*math.Pow(u, 0.85))
-	} else { // passive expiration, then an end-expiratory pause
-		k := p.respK
-		v = (math.Exp(-k*(x-f)/(1-f)) - math.Exp(-k)) / (1 - math.Exp(-k))
+	if p.breathing {
+		x := (t - p.breathStart) / p.breathPer
+		f := p.breathF
+		if x < f { // inspiration: smooth rise, a little faster at the start
+			u := x / f
+			v = 0.5 - 0.5*math.Cos(math.Pi*math.Pow(u, 0.85))
+		} else { // passive expiration, then an end-expiratory pause
+			k := p.breathK
+			v = (math.Exp(-k*(x-f)/(1-f)) - math.Exp(-k)) / (1 - math.Exp(-k))
+		}
+		v *= p.breathAmp
+		// slow baseline (lung volume) drift
+		v += 0.07 * math.Sin(2*math.Pi*t/p.respBaseT+p.respBasePh)
 	}
-	v *= p.breathAmp
-	// slow baseline (lung volume) drift and the small cardiac ripple that
-	// impedance pneumography picks up from each heartbeat
-	v += 0.07 * math.Sin(2*math.Pi*t/p.respBaseT+p.respBasePh)
-	v += 0.03 * math.Sin(2*math.Pi*p.ventRate()/60*t+p.ph[2])
+	// the small cardiac ripple that impedance pneumography picks up from
+	// each heartbeat (none without a heartbeat that moves blood)
+	v += 0.03 * p.perf * math.Sin(2*math.Pi*p.ventRate()/60*t+p.ph[2])
 	return v + 0.01*p.rng.NormFloat64()
 }
 
 // newBreath starts the next breath with natural breath-to-breath variation:
 // a slowly drifting rate and depth (deeper breaths tend to be slower), small
 // changes in timing, an occasional sigh and the odd shallow breath.
+//
+// After a cardiac arrest (see updatePerf) breathing goes on briefly, then
+// gives way to agonal gasps and finally apnea; it resumes a few seconds after
+// a pulse returns.
 func (p *Patient) newBreath() {
 	r := p.rng
 	p.breathStart = p.nextBreath
+	t := p.breathStart
+	switch {
+	case !math.IsNaN(p.arrestT0) && t >= p.arrestApnea, t < p.roscBreath:
+		// apneic: check again in a second
+		p.breathing = false
+		p.breathPer, p.nextBreath = 1, t+1
+		return
+	case !math.IsNaN(p.arrestT0) && t >= p.arrestGasp:
+		// agonal gasp: a quick, deep, irregular inspiration and a brief
+		// expiration, then nothing until the next gasp
+		per := 7 + 7*r.Float64()
+		p.breathing, p.gasp = true, true
+		p.breathPer = per
+		p.breathAmp = p.respDepth * (1.1 + 0.6*r.Float64())
+		p.breathF = (0.45 + 0.25*r.Float64()) / per
+		p.breathK = 2.5 * per // empties in well under a second
+		p.breathEt = 0.6 + 0.2*r.Float64()
+		p.nextBreath = t + per
+		p.breaths = append(p.breaths, t)
+		return
+	}
+	p.breathing, p.gasp = true, false
+	p.breathK = p.respK
 	p.respDrift = 0.8*p.respDrift + 0.6*r.NormFloat64()*0.6
 	per := 60 / float64(max(p.Cfg.RR, 1)) * (1 + 0.06*p.respDrift + 0.04*r.NormFloat64())
 	amp := p.respDepth * (1 + 0.07*p.respDrift + 0.07*r.NormFloat64())
@@ -1895,7 +1987,9 @@ func (p *Patient) computeRR(now float64) {
 			past = append(past, b)
 		}
 	}
-	last := p.switchT // apnea timer starts when the bed was (re)configured
+	// the apnea timer starts when breathing was (re)set up, not on a rhythm
+	// change: a patient who has stopped breathing stays apneic
+	last := p.respT0
 	if len(past) > 0 && past[len(past)-1] > last {
 		last = past[len(past)-1]
 	}
@@ -1922,12 +2016,19 @@ func (p *Patient) plethValue(t float64) float64 {
 		return 0
 	}
 	v := 0.0
+	d := clamp(float64(p.Cfg.Tune.PlethDamp)/100, 0, 1)
 	for _, q := range p.pulses {
 		dt := t - q.t
-		if dt < -0.2 || dt > 1.2 {
+		if dt < -0.2 || dt > 1.4 {
 			continue
 		}
 		w := q.amp * (ag(dt, 0.10, 0.045, 0.17, 1.0) + g(dt, 0.37, 0.05, 0.14))
+		if d > 0 {
+			// a damped probe site: a smaller, rounder pulse with a slower
+			// upstroke and the dicrotic notch smoothed away
+			w = q.amp * (1 - 0.6*d) * (ag(dt, 0.10+0.06*d, 0.045*(1+1.6*d), 0.17*(1+0.9*d), 1.0) +
+				(1-0.9*d)*g(dt, 0.37+0.04*d, 0.05*(1+0.8*d), 0.14))
+		}
 		if w > v {
 			v = w
 		}
@@ -2040,3 +2141,35 @@ func (p *Patient) sinusEvent(tP float64) bool {
 	}
 	return false
 }
+
+// ---- temperature units ----
+
+// TempF selects the temperature display unit: °F (true) or °C. Temperatures
+// are kept in °C.
+var TempF = true
+
+// TempOut converts °C to the display unit; TempIn converts back.
+func TempOut(c float64) float64 {
+	if TempF {
+		return c*9/5 + 32
+	}
+	return c
+}
+
+func TempIn(v float64) float64 {
+	if TempF {
+		return (v - 32) * 5 / 9
+	}
+	return v
+}
+
+// TempUnit is the display unit's symbol.
+func TempUnit() string {
+	if TempF {
+		return "°F"
+	}
+	return "°C"
+}
+
+// TempStr formats a temperature (°C) in the display unit with one decimal.
+func TempStr(c float64) string { return strconv.FormatFloat(TempOut(c), 'f', 1, 64) }

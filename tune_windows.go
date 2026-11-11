@@ -21,7 +21,7 @@ const (
 var (
 	tuneHwnd  uintptr
 	tuneBed   int
-	tuneEdits [7]uintptr
+	tuneEdits [8]uintptr
 	tuneOrig  Tune // to restore on Cancel
 )
 
@@ -39,6 +39,7 @@ var tuneFields = []tuneField{
 	{"QRS amplitude:", "%", 0, 300, false},
 	{"T wave amplitude:", "%", -300, 300, false},
 	{"ST segment:", "mm", -10, 10, false},
+	{"Pleth damping:", "%", 0, 100, false},
 }
 
 func tuneValues(t Tune) []float64 {
@@ -46,7 +47,7 @@ func tuneValues(t Tune) []float64 {
 		t = DefaultTune()
 	}
 	return []float64{float64(t.PRms), float64(t.QRSms), float64(t.QTms),
-		float64(t.PAmp), float64(t.QRSAmp), float64(t.TAmp), t.STmm}
+		float64(t.PAmp), float64(t.QRSAmp), float64(t.TAmp), t.STmm, float64(t.PlethDamp)}
 }
 
 func fmtNum(v float64) string {
@@ -75,6 +76,7 @@ func tuneHints(p *Patient) []string {
 		"100 = normal",
 		"100 = normal, negative = inverted",
 		"+ elevation / - depression",
+		"0 = finger, ~50 ear, ~70 nose",
 	}
 }
 
@@ -90,7 +92,7 @@ func openTune(bed int) {
 	p := patients[bed]
 	tuneOrig = p.Cfg.Tune
 	uiFont = font(S(15), false, "Segoe UI")
-	w, h := S(470), S(420)
+	w, h := S(470), S(456)
 	var mr RECT
 	call(pGetWindowRect, mainHwnd, uintptr(unsafe.Pointer(&mr)))
 	x := mr.Left + (mr.Right-mr.Left-w)/2
@@ -108,8 +110,8 @@ func openTune(bed int) {
 		ctl("STATIC", f.unit+"   "+hints[i], 0, S(232), ry+S(3), S(225), S(22), 0)
 	}
 	ctl("STATIC", "PR applies to sinus, AV-block and atrial-paced rhythms. QRS width, QT and ST shape the patient's own (narrow) beats.",
-		0, S(16), S(16)+S(36)*7, w-S(40), S(40), 0)
-	by := S(16) + S(36)*7 + S(48)
+		0, S(16), S(16)+S(36)*8, w-S(40), S(40), 0)
+	by := S(16) + S(36)*8 + S(48)
 	ctl("BUTTON", "OK", WS_TABSTOP|BS_DEFPUSHBUTTON, S(30), by, S(95), S(30), 1)
 	ctl("BUTTON", "Apply", WS_TABSTOP, S(135), by, S(95), S(30), ctlTuneApply)
 	ctl("BUTTON", "Reset", WS_TABSTOP, S(240), by, S(95), S(30), ctlTuneReset)
@@ -142,7 +144,7 @@ func readTune() Tune {
 		if !(f.zeroAuto && x == 0) {
 			x = clamp(x, f.lo, f.hi)
 		}
-		if i < 6 {
+		if i != 6 {
 			x = math.Round(x)
 		} else {
 			x = math.Round(x*2) / 2 // ST in 0.5 mm steps
@@ -152,7 +154,7 @@ func readTune() Tune {
 	}
 	return Tune{Set: true, UserSet: true, Natural: patients[tuneBed].Cfg.Tune.Natural,
 		PRms: int(v[0]), QRSms: int(v[1]), QTms: int(v[2]),
-		PAmp: int(v[3]), QRSAmp: int(v[4]), TAmp: int(v[5]), STmm: v[6]}
+		PAmp: int(v[3]), QRSAmp: int(v[4]), TAmp: int(v[5]), STmm: v[6], PlethDamp: int(v[7])}
 }
 
 func tuneProc(hwnd, msg, wp, lp uintptr) uintptr {

@@ -14,7 +14,7 @@ const (
 )
 
 var NBPModeNames = []string{"Off", "Manual", "Auto"}
-var NBPIntervals = []int{1, 3, 5, 10, 15, 30, 60, 240, 480} // minutes
+var NBPIntervals = []int{1, 3, 5, 10, 15, 30, 60, 120, 240, 480} // minutes
 
 // nbpMinutes is the auto-cycle interval in minutes (0 = default 15 min).
 func nbpMinutes(c Config) int {
@@ -42,8 +42,11 @@ func itoaS(v int) string {
 // NBPModeLabel is the mode text next to the NBP timestamp: "Auto 15 min"
 // in auto mode, nothing in manual mode.
 func NBPModeLabel(c Config) string {
-	if c.NBPMode == NBPAuto {
+	switch c.NBPMode {
+	case NBPAuto:
 		return "Auto " + NBPIntervalLabel(nbpMinutes(c))
+	case NBPManual:
+		return "Manual"
 	}
 	return ""
 }
@@ -66,6 +69,9 @@ type vitals struct {
 
 	EtCO2Disp, AwRR int
 	CO2Valid        bool
+
+	TempDisp  float64 // displayed temperature (°C)
+	TempValid bool
 
 	NBPSys, NBPDia, NBPMap int
 	NBPValid               bool    // a completed reading exists
@@ -116,14 +122,36 @@ func (p *Patient) updatePerf(t float64) {
 		}
 	}
 	target := p.perfTarget
-	if t-last > math.Max(2.0, 2.2*60/p.ventRate()) {
+	arrest := t-last > math.Max(2.0, math.Min(6, 2.2*60/p.ventRate()))
+	if arrest {
 		target = 0
 	}
+	p.updateArrest(t, arrest)
 	tau := 8.0
 	if target < p.perf {
 		tau = 20
 	}
 	p.perf += (target - p.perf) / (FS * tau)
+}
+
+// updateArrest follows the breathing through a cardiac arrest: once the
+// pulse is lost the patient keeps breathing for 8-15 s (until the brain runs
+// out of oxygen), then makes agonal gasps for 30-90 s, then stops breathing.
+// When a pulse returns, spontaneous breathing resumes after 5-12 s.
+func (p *Patient) updateArrest(t float64, arrest bool) {
+	r := p.rng
+	switch {
+	case arrest && math.IsNaN(p.arrestT0):
+		p.arrestT0 = t
+		p.arrestGasp = t + 8 + 7*r.Float64()
+		p.arrestApnea = p.arrestGasp + 30 + 60*r.Float64()
+	case !arrest && !math.IsNaN(p.arrestT0):
+		if !p.breathing || t >= p.arrestGasp {
+			p.roscBreath = t + 5 + 7*r.Float64()
+			p.nextBreath = math.Min(p.nextBreath, t+1)
+		}
+		p.arrestT0 = math.NaN()
+	}
 }
 
 func (p *Patient) ABPAt(k int64) float32 { return p.abuf[((k%bufLen)+bufLen)%bufLen] }
@@ -199,11 +227,27 @@ func (p *Patient) co2Value(t float64) float64 {
 	if !p.Cfg.CO2On {
 		return 0
 	}
-	if p.Cfg.Apnea || p.breathPer <= 0 {
+	if p.Cfg.Apnea || p.breathPer <= 0 || !p.breathing {
 		return 0.3 * math.Abs(p.rng.NormFloat64())
 	}
 	// no pulmonary blood flow -> little CO2 delivered to the lungs
 	et := float64(p.Cfg.EtCO2) * p.breathEt * (0.15 + 0.85*p.perf)
+	if p.gasp {
+		// agonal gasp: a brief exhalation gives a small, short CO2 hump,
+		// then the trace returns to baseline until the next gasp
+		dt := t - p.breathStart - p.breathF*p.breathPer
+		var v float64
+		switch {
+		case dt < 0:
+			v = 0
+		case dt < 1.2:
+			v = et * (1 - math.Exp(-dt/0.12))
+		default:
+			v = et * (1 - math.Exp(-1.2/0.12)) * math.Exp(-(dt-1.2)/0.25)
+		}
+		p.lastEt = 0
+		return v + 0.25*p.rng.NormFloat64()
+	}
 	x := (t - p.breathStart) / p.breathPer
 	f := p.breathF // follows this breath's inspiratory time
 	var v float64
@@ -309,6 +353,7 @@ func clampInt(v, lo, hi int) int {
 
 // measureVitals derives ABP and EtCO2 numerics from their waveforms (1/s).
 func (p *Patient) measureVitals(now float64) {
+	p.measureTemp(now)
 	last := p.Last()
 	p.ABPValid, p.ABPPulsatile = false, false
 	if p.Cfg.ABPOn && last > int64(4*FS) {
@@ -364,4 +409,30 @@ func (p *Patient) stMeasurable() bool {
 		return false
 	}
 	return true
+}
+
+// measureTemp updates the temperature probe reading. Body temperature
+// changes slowly: the reading moves toward the patient's set temperature
+// with a time constant of about 20 s, plus a small natural drift of a tenth
+// of a degree or so. A newly placed probe reads the patient's temperature
+// at once.
+func (p *Patient) measureTemp(now float64) {
+	if !p.Cfg.TempOn {
+		p.TempValid, p.tempT = false, 0
+		return
+	}
+	target := p.Cfg.Temp
+	if target == 0 {
+		target = 37
+	}
+	if p.tempT == 0 || now-p.tempT > 30 {
+		p.tempVal, p.tempDrift = target, 0
+	} else if dt := now - p.tempT; dt > 0 {
+		p.tempVal += (target - p.tempVal) * (1 - math.Exp(-dt/20))
+		p.tempDrift += -p.tempDrift*dt/120 + 0.012*math.Sqrt(dt)*p.rng.NormFloat64()
+		p.tempDrift = clamp(p.tempDrift, -0.15, 0.15)
+	}
+	p.tempT = now
+	p.TempDisp = math.Round((p.tempVal+p.tempDrift)*100) / 100
+	p.TempValid = true
 }

@@ -20,11 +20,11 @@ const MeasArrhy = 6
 
 var measTitles = map[int]string{
 	MeasECG: "Setup ECG", MeasArrhy: "Setup Arrhythmia", MeasSpO2: "Setup SpO₂",
-	MeasResp: "Setup Resp", MeasNBP: "Setup NBP", MeasABP: "Setup ABP", MeasCO2: "Setup CO₂",
+	MeasResp: "Setup Resp", MeasNBP: "Setup NBP", MeasABP: "Setup ABP", MeasCO2: "Setup CO₂", MeasTemp: "Setup Temp",
 }
 
 // measOrder is the order of the Measurements menu.
-var measOrder = []int{MeasECG, MeasArrhy, MeasSpO2, MeasResp, MeasNBP, MeasABP, MeasCO2}
+var measOrder = []int{MeasECG, MeasArrhy, MeasSpO2, MeasResp, MeasNBP, MeasABP, MeasCO2, MeasTemp}
 
 // mItem is one row of a setup window.
 type mItem struct {
@@ -248,6 +248,16 @@ func measMenu(kind int) []mItem {
 				}),
 			cfgRow("Patient SpO₂ (sim)", func(c *Config) string { return it(c.SpO2) + " %" }, intList(50, 100, 1),
 				func(p *Patient, s string) { p.Cfg.SpO2 = atoi(s) }),
+			{label: "Pleth Damping (sim)", value: func(p *Patient) string { return plethDampName(p.Cfg.Tune.PlethDamp) },
+				choices: func(*Patient) []string { return plethDampNames },
+				set: func(p *Patient, i int) {
+					tn := p.Cfg.Tune
+					if !tn.Set {
+						tn = DefaultTune()
+					}
+					tn.PlethDamp = plethDampSteps[i]
+					p.SetTune(tn)
+				}},
 			intLimit("High Limit", func(l *AlarmLimits) *int { return &l.SpO2High }, 51, 100, 1, 1,
 				func(l *AlarmLimits) { l.SpO2Low = min(l.SpO2Low, l.SpO2High-1); l.Desat = min(l.Desat, l.SpO2Low) }),
 			intLimit("Low Limit", func(l *AlarmLimits) *int { return &l.SpO2Low }, 50, 99, 1, 1,
@@ -321,6 +331,10 @@ func measMenu(kind int) []mItem {
 				func(l *AlarmLimits) { l.NBPsLow = min(l.NBPsLow, l.NBPsHigh-5) }),
 			intLimit("NBPs Low Limit", func(l *AlarmLimits) *int { return &l.NBPsLow }, 40, 265, 5, 1,
 				func(l *AlarmLimits) { l.NBPsHigh = max(l.NBPsHigh, l.NBPsLow+5) }),
+			intLimit("NBPd High Limit", func(l *AlarmLimits) *int { return &l.NBPdHigh }, 20, 200, 5, 3,
+				func(l *AlarmLimits) { l.NBPdLow = min(l.NBPdLow, l.NBPdHigh-5) }),
+			intLimit("NBPd Low Limit", func(l *AlarmLimits) *int { return &l.NBPdLow }, 10, 195, 5, 3,
+				func(l *AlarmLimits) { l.NBPdHigh = max(l.NBPdHigh, l.NBPdLow+5) }),
 			alarmsRow(MeasNBP),
 		}
 	case MeasABP:
@@ -347,6 +361,10 @@ func measMenu(kind int) []mItem {
 					l.ABPsHigh = max(l.ABPsHigh, l.ABPsLow+5)
 					l.ABPsXLow = min(l.ABPsXLow, l.ABPsLow)
 				}),
+			intLimit("ABPd High Limit", func(l *AlarmLimits) *int { return &l.ABPdHigh }, 20, 200, 5, 3,
+				func(l *AlarmLimits) { l.ABPdLow = min(l.ABPdLow, l.ABPdHigh-5) }),
+			intLimit("ABPd Low Limit", func(l *AlarmLimits) *int { return &l.ABPdLow }, 10, 195, 5, 3,
+				func(l *AlarmLimits) { l.ABPdHigh = max(l.ABPdHigh, l.ABPdLow+5) }),
 			intLimit("Extreme High", func(l *AlarmLimits) *int { return &l.ABPsXHigh }, 50, 300, 5, 2,
 				func(l *AlarmLimits) { l.ABPsHigh = min(l.ABPsHigh, l.ABPsXHigh) }),
 			intLimit("Extreme Low", func(l *AlarmLimits) *int { return &l.ABPsXLow }, 15, 250, 5, 2,
@@ -369,8 +387,69 @@ func measMenu(kind int) []mItem {
 			}},
 			alarmsRow(MeasCO2),
 		}
+	case MeasTemp:
+		return []mItem{
+			cfgRow("Temp", func(c *Config) string { return onOffStr(c.TempOn) }, onOff,
+				func(p *Patient, s string) { p.Cfg.TempOn = s == "On" }),
+			tempRow("Patient Temp (sim)", func(p *Patient) *float64 { return &p.Cfg.Temp }, 30, 43, 0),
+			tempRow("Temp High Limit", func(p *Patient) *float64 { return &ownLim(p).TempHigh }, 30, 43, 1),
+			tempRow("Temp Low Limit", func(p *Patient) *float64 { return &ownLim(p).TempLow }, 30, 43, 1),
+			{label: "Unit", value: func(*Patient) string { return TempUnit() },
+				choices: func(*Patient) []string { return []string{"°F", "°C"} },
+				set:     func(_ *Patient, i int) { setTempUnit(i == 0) }},
+			alarmsRow(MeasTemp),
+		}
 	}
 	return nil
+}
+
+// tempRow edits a temperature (kept in °C) in the display unit, in steps
+// of 0.1 between lo and hi °C. For limits the pair is kept in order.
+func tempRow(label string, f func(p *Patient) *float64, lo, hi float64, group int) mItem {
+	vals := func() []float64 {
+		var o []float64
+		a, b := math.Round(TempOut(lo)*10), math.Round(TempOut(hi)*10)
+		for x := a; x <= b; x++ {
+			o = append(o, x/10)
+		}
+		return o
+	}
+	cur := func(p *Patient) float64 {
+		if group == 0 {
+			return *f(p)
+		}
+		l := p.lim() // a limit: read without making the patient's own copy
+		if strings.Contains(label, "High") {
+			return l.TempHigh
+		}
+		return l.TempLow
+	}
+	return mItem{label: label, group: group,
+		value: func(p *Patient) string {
+			v := cur(p)
+			if v == 0 {
+				v = 37
+			}
+			return TempStr(v) + " " + TempUnit()
+		},
+		choices: func(*Patient) []string {
+			var o []string
+			for _, v := range vals() {
+				o = append(o, strconv.FormatFloat(v, 'f', 1, 64))
+			}
+			return o
+		},
+		set: func(p *Patient, i int) {
+			*f(p) = TempIn(vals()[i])
+			if group != 0 {
+				l := ownLim(p)
+				if strings.Contains(label, "High") {
+					l.TempLow = math.Min(l.TempLow, l.TempHigh-0.1)
+				} else {
+					l.TempHigh = math.Max(l.TempHigh, l.TempLow+0.1)
+				}
+			}
+		}}
 }
 
 var afDelays = []int{10, 20, 30, 60, 120, 180, 300, 600}
@@ -395,6 +474,8 @@ func measOfKind(k int) int {
 		return MeasABP
 	case kCO2, kAwRR:
 		return MeasCO2
+	case kTemp:
+		return MeasTemp
 	case kPVCnum:
 		return MeasArrhy
 	}
@@ -696,4 +777,29 @@ func chooseMeas(hwnd uintptr, bed int, r RECT) {
 		closeMeas()
 		openLimits(bed)
 	}
+}
+
+// Pleth damping choices for Setup SpO₂ (finer values: Fine Tune).
+var (
+	plethDampSteps = []int{0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+	plethDampNames = func() []string {
+		var o []string
+		for _, d := range plethDampSteps {
+			o = append(o, plethDampName(d))
+		}
+		return o
+	}()
+)
+
+func plethDampName(d int) string {
+	s := strconv.Itoa(d) + " %"
+	switch {
+	case d == 0:
+		s += "  (finger)"
+	case d >= 40 && d <= 60:
+		s += "  (ear)"
+	case d > 60 && d <= 80:
+		s += "  (nose)"
+	}
+	return s
 }

@@ -21,6 +21,7 @@ type quizState struct {
 	item            quizItem
 	choices         []string
 	answered        bool
+	used            map[int]bool // rhythms shown in this quiz
 	rng             *rand.Rand
 	radios          [4]uintptr
 	submit, next    uintptr
@@ -46,13 +47,43 @@ func openQuiz() {
 	showStrip(s, "Rhythm Quiz")
 }
 
+// quizDeck is a shuffled deck of quiz rhythms (indexes into quizPool). Each
+// question takes the next card, so no rhythm comes up twice until every one
+// has been shown; the deck carries over from one quiz to the next.
+var (
+	quizDeck []int
+	quizLast = -1
+)
+
+func quizDraw(r *rand.Rand, used map[int]bool) int {
+	if len(quizDeck) == 0 {
+		// new deck; rhythms already shown in this quiz go to the back
+		var fresh, later []int
+		for _, i := range r.Perm(len(quizPool)) {
+			if used[i] || i == quizLast {
+				later = append(later, i)
+			} else {
+				fresh = append(fresh, i)
+			}
+		}
+		quizDeck = append(fresh, later...)
+	}
+	quizLast = quizDeck[0]
+	quizDeck = quizDeck[1:]
+	used[quizLast] = true
+	return quizLast
+}
+
 // quizQuestion generates the next strip and its four choices.
 func quizQuestion(s *Strip) {
 	q := s.quiz
 	r := q.rng
 	q.n++
 	q.answered = false
-	q.item = quizPool[r.Intn(len(quizPool))]
+	if q.n == 1 || q.used == nil {
+		q.used = map[int]bool{}
+	}
+	q.item = quizPool[quizDraw(r, q.used)]
 	s.data, s.paces, s.lead, _ = quizStrip(r, q.item)
 	s.cal = calipers{}
 	// choices: the answer, two from similar rhythms, one from anywhere

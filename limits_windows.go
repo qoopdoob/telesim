@@ -26,47 +26,54 @@ type limField struct {
 	label, unit string
 	i           func(l *AlarmLimits) *int
 	f           func(l *AlarmLimits) *float64
+	temp        bool // a temperature: kept in °C, shown in the display unit
 }
 
 var limFields = []limField{
 	// column 1: heart rate and arrhythmia
-	{"HR low limit:", "bpm", func(l *AlarmLimits) *int { return &l.HRLow }, nil},
-	{"HR high limit:", "bpm", func(l *AlarmLimits) *int { return &l.HRHigh }, nil},
-	{"\u2206ExtrBrady (below HR low):", "bpm", func(l *AlarmLimits) *int { return &l.ExtBradyD }, nil},
-	{"\u2206ExtrTachy (above HR high):", "bpm", func(l *AlarmLimits) *int { return &l.ExtTachyD }, nil},
-	{"V-Tach HR:", "bpm", func(l *AlarmLimits) *int { return &l.VTachHR }, nil},
-	{"V-Tach run:", "PVCs", func(l *AlarmLimits) *int { return &l.VTachRun }, nil},
-	{"Vent rhythm run:", "PVCs", func(l *AlarmLimits) *int { return &l.VentRhythmRun }, nil},
-	{"SVT HR:", "bpm", func(l *AlarmLimits) *int { return &l.SVTHR }, nil},
-	{"SVT run:", "SV beats", func(l *AlarmLimits) *int { return &l.SVTRun }, nil},
-	{"PVCs/min:", "/min", func(l *AlarmLimits) *int { return &l.PVCsMin }, nil},
-	{"Asystole threshold:", "sec", nil, func(l *AlarmLimits) *float64 { return &l.AsystoleSec }},
-	{"Pause threshold:", "sec", nil, func(l *AlarmLimits) *float64 { return &l.PauseSec }},
-	{"AFib/IHR end delay:", "sec", func(l *AlarmLimits) *int { return &l.AfEndDelay }, nil},
-	{"ST high limit:", "mm", nil, func(l *AlarmLimits) *float64 { return &l.STHigh }},
-	{"ST low limit:", "mm", nil, func(l *AlarmLimits) *float64 { return &l.STLow }},
+	{"HR low limit:", "bpm", func(l *AlarmLimits) *int { return &l.HRLow }, nil, false},
+	{"HR high limit:", "bpm", func(l *AlarmLimits) *int { return &l.HRHigh }, nil, false},
+	{"\u2206ExtrBrady (below HR low):", "bpm", func(l *AlarmLimits) *int { return &l.ExtBradyD }, nil, false},
+	{"\u2206ExtrTachy (above HR high):", "bpm", func(l *AlarmLimits) *int { return &l.ExtTachyD }, nil, false},
+	{"V-Tach HR:", "bpm", func(l *AlarmLimits) *int { return &l.VTachHR }, nil, false},
+	{"V-Tach run:", "PVCs", func(l *AlarmLimits) *int { return &l.VTachRun }, nil, false},
+	{"Vent rhythm run:", "PVCs", func(l *AlarmLimits) *int { return &l.VentRhythmRun }, nil, false},
+	{"SVT HR:", "bpm", func(l *AlarmLimits) *int { return &l.SVTHR }, nil, false},
+	{"SVT run:", "SV beats", func(l *AlarmLimits) *int { return &l.SVTRun }, nil, false},
+	{"PVCs/min:", "/min", func(l *AlarmLimits) *int { return &l.PVCsMin }, nil, false},
+	{"Asystole threshold:", "sec", nil, func(l *AlarmLimits) *float64 { return &l.AsystoleSec }, false},
+	{"Pause threshold:", "sec", nil, func(l *AlarmLimits) *float64 { return &l.PauseSec }, false},
+	{"AFib/IHR end delay:", "sec", func(l *AlarmLimits) *int { return &l.AfEndDelay }, nil, false},
+	{"ST high limit:", "mm", nil, func(l *AlarmLimits) *float64 { return &l.STHigh }, false},
+	{"ST low limit:", "mm", nil, func(l *AlarmLimits) *float64 { return &l.STLow }, false},
 	// column 2: other measurements
-	{"QTc high limit:", "ms", func(l *AlarmLimits) *int { return &l.QTcHigh }, nil},
-	{"SpO\u2082 low limit:", "%", func(l *AlarmLimits) *int { return &l.SpO2Low }, nil},
-	{"SpO\u2082 desat limit:", "%", func(l *AlarmLimits) *int { return &l.Desat }, nil},
-	{"RR low limit:", "rpm", func(l *AlarmLimits) *int { return &l.RRLow }, nil},
-	{"RR high limit:", "rpm", func(l *AlarmLimits) *int { return &l.RRHigh }, nil},
-	{"Apnea time:", "sec", func(l *AlarmLimits) *int { return &l.ApneaSec }, nil},
-	{"NBPs high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.NBPsHigh }, nil},
-	{"NBPs low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.NBPsLow }, nil},
-	{"ABPs high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsHigh }, nil},
-	{"ABPs low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsLow }, nil},
-	{"ABPs extreme high (red):", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsXHigh }, nil},
-	{"ABPs extreme low (red):", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsXLow }, nil},
-	{"etCO\u2082 high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.EtCO2High }, nil},
-	{"etCO\u2082 low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.EtCO2Low }, nil},
+	{"QTc high limit:", "ms", func(l *AlarmLimits) *int { return &l.QTcHigh }, nil, false},
+	{"SpO\u2082 low limit:", "%", func(l *AlarmLimits) *int { return &l.SpO2Low }, nil, false},
+	{"SpO\u2082 desat limit:", "%", func(l *AlarmLimits) *int { return &l.Desat }, nil, false},
+	{"RR low limit:", "rpm", func(l *AlarmLimits) *int { return &l.RRLow }, nil, false},
+	{"RR high limit:", "rpm", func(l *AlarmLimits) *int { return &l.RRHigh }, nil, false},
+	{"Apnea time:", "sec", func(l *AlarmLimits) *int { return &l.ApneaSec }, nil, false},
+	{"NBPs high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.NBPsHigh }, nil, false},
+	{"NBPs low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.NBPsLow }, nil, false},
+	{"NBPd high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.NBPdHigh }, nil, false},
+	{"NBPd low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.NBPdLow }, nil, false},
+	{"ABPs high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsHigh }, nil, false},
+	{"ABPs low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsLow }, nil, false},
+	{"ABPd high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.ABPdHigh }, nil, false},
+	{"ABPd low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.ABPdLow }, nil, false},
+	{"ABPs extreme high (red):", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsXHigh }, nil, false},
+	{"ABPs extreme low (red):", "mmHg", func(l *AlarmLimits) *int { return &l.ABPsXLow }, nil, false},
+	{"etCO\u2082 high limit:", "mmHg", func(l *AlarmLimits) *int { return &l.EtCO2High }, nil, false},
+	{"etCO\u2082 low limit:", "mmHg", func(l *AlarmLimits) *int { return &l.EtCO2Low }, nil, false},
+	{"Temp high limit:", "", nil, func(l *AlarmLimits) *float64 { return &l.TempHigh }, true},
+	{"Temp low limit:", "", nil, func(l *AlarmLimits) *float64 { return &l.TempLow }, true},
 }
 
-const limRows = 15
+const limRows = 18
 
 var (
 	limitsHwnd uintptr
-	limEdits   [29]uintptr
+	limEdits   [35]uintptr
 	limArrBox  [16]uintptr
 	limBed     = -1 // -1 = station-wide
 	hUseStn    uintptr
@@ -75,6 +82,9 @@ var (
 
 func limitGet(l *AlarmLimits, i int) string {
 	if f := limFields[i]; f.f != nil {
+		if f.temp {
+			return TempStr(*f.f(l))
+		}
 		return strconv.FormatFloat(*f.f(l), 'f', 1, 64)
 	}
 	return strconv.Itoa(*limFields[i].i(l))
@@ -96,7 +106,7 @@ func openLimits(bed int) {
 	}
 	limBed = bed
 	uiFont = font(S(15), false, "Segoe UI")
-	w, h := S(1110), S(708)
+	w, h := S(1110), S(810)
 	if bed >= 0 {
 		h += S(38) // room for "Use station-wide limits"
 	}
@@ -132,7 +142,11 @@ func openLimits(bed int) {
 			style = WS_TABSTOP | ES_AUTOHSCROLL // allows "-" and "."
 		}
 		limEdits[i] = ctl("EDIT", limitGet(&cur, i), style, x+S(226), y, S(60), S(26), 50+i)
-		ctl("STATIC", fd.unit, 0, x+S(294), y+S(3), S(70), S(22), 0)
+		unit := fd.unit
+		if fd.temp {
+			unit = TempUnit()
+		}
+		ctl("STATIC", unit, 0, x+S(294), y+S(3), S(70), S(22), 0)
 	}
 	// column 3: arrhythmia alarms switched on/off individually
 	ax := S(16) + S(400)*2
@@ -198,7 +212,13 @@ func applyLimits() bool {
 		patients[limBed].computeHR(now())
 		return true
 	}
-	var l AlarmLimits
+	// start from the limits in force, so settings not in this table (such as
+	// SpO2 high) are kept
+	l := Limits
+	if limBed >= 0 {
+		l = patients[limBed].lim()
+	}
+	l.ArrOff = 0
 	for i, fd := range limFields {
 		txt := strings.TrimSpace(strings.ReplaceAll(getText(limEdits[i]), ",", "."))
 		if fd.f != nil {
@@ -207,7 +227,12 @@ func applyLimits() bool {
 				messageBox(limitsHwnd, fd.label+" must be a number", "Alarm Limits", 0x30)
 				return false
 			}
-			*fd.f(&l) = math.Round(v*10) / 10
+			if fd.temp {
+				v = TempIn(math.Round(v*10) / 10)
+			} else {
+				v = math.Round(v*10) / 10
+			}
+			*fd.f(&l) = v
 		} else {
 			*fd.i(&l), _ = strconv.Atoi(txt)
 		}
@@ -249,8 +274,10 @@ func applyLimits() bool {
 		return bad("Respiratory limits: RR low must be below RR high, and apnea time 5 - 120 s")
 	case !(l.STLow < l.STHigh && l.STHigh <= 20 && l.STLow >= -20):
 		return bad("ST limits: ST low must be below ST high (within -20 to +20 mm)")
-	case !(l.NBPsLow < l.NBPsHigh && l.ABPsLow < l.ABPsHigh && l.EtCO2Low < l.EtCO2High):
-		return bad("For NBP, ABP and etCO2 the low limit must be below the high limit")
+	case !(l.NBPsLow < l.NBPsHigh && l.ABPsLow < l.ABPsHigh && l.NBPdLow < l.NBPdHigh && l.ABPdLow < l.ABPdHigh && l.EtCO2Low < l.EtCO2High):
+		return bad("For NBP and ABP (systolic and diastolic) and etCO2 the low limit must be below the high limit")
+	case !(l.TempLow < l.TempHigh && l.TempLow >= 25 && l.TempHigh <= 45):
+		return bad("Temperature limits: the low limit must be below the high limit")
 	case !(l.ABPsXLow <= l.ABPsLow && l.ABPsHigh <= l.ABPsXHigh):
 		return bad("ABP extreme limits must lie outside the ABP limits:\nextreme low <= low < high <= extreme high")
 	}

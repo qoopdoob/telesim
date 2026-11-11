@@ -25,6 +25,7 @@ const (
 	kST
 	kQT
 	kAwRR
+	kTemp
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 	cRed        = rgb(255, 48, 48)
 	cPink       = rgb(240, 130, 235)
 	cYellow     = rgb(255, 255, 0)
+	cTemp       = rgb(255, 244, 150) // temperature: pale yellow
 )
 
 // drawBP draws a pressure numeric: label (+ small sub-label) at top left,
@@ -115,7 +117,7 @@ func drawParamNumeric(dc uintptr, r RECT, kind int, p *Patient) {
 	case kPulse:
 		drawNumeric(dc, r, "Pulse", q(p.SpO2Valid && p.Pulse > 0, p.Pulse), cCyan, it(lm.HRHigh), it(lm.HRLow))
 	case kRR:
-		drawNumeric(dc, r, "RR", q(p.RRValid, p.RRDisp), cPurple, it(lm.RRHigh), it(lm.RRLow))
+		drawNumeric(dc, r, "RR", q(p.RRValid, p.RRDisp), cResp, it(lm.RRHigh), it(lm.RRLow))
 	case kAwRR:
 		drawNumeric(dc, r, "awRR", q(p.CO2Valid, p.AwRR), cYellow, "", "")
 	case kCO2:
@@ -136,9 +138,17 @@ func drawParamNumeric(dc uintptr, r RECT, kind int, p *Patient) {
 				sub += "  " + m
 			}
 			drawBP(dc, r, "NBP", sub, it(p.NBPSys)+"/"+it(p.NBPDia), "("+it(p.NBPMap)+")", cPink)
-		default:
+		case p.NBPFailed:
 			drawBP(dc, r, "NBP", NBPModeLabel(p.Cfg), "-?-", "", cPink)
+		default: // no reading yet (e.g. a cuff in manual mode): blank
+			drawBP(dc, r, "NBP", NBPModeLabel(p.Cfg), "", "", cPink)
 		}
+	case kTemp:
+		v := "-?-"
+		if p.TempValid {
+			v = TempStr(p.TempDisp)
+		}
+		drawNumeric(dc, r, "Temp "+TempUnit(), v, cTemp, TempStr(lm.TempHigh), TempStr(lm.TempLow))
 	case kPVCnum:
 		pvc := "-?-"
 		if !p.LeadsOff() && p.HRValid {
